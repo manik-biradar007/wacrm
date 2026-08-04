@@ -187,6 +187,16 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
       return { note: "" };
     case "end":
       return {};
+    case "http_fetch":
+      // Not creatable via the "Add node" menu — bespoke order-lookup
+      // node, edited via the API. Default only exists to keep this
+      // switch exhaustive over NodeType.
+      return {
+        mobile_var: "mobile",
+        active_next: "",
+        expired_next: "",
+        not_found_next: "",
+      };
   }
 }
 

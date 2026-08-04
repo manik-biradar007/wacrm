@@ -43,6 +43,11 @@ import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
 import {
+  lookupOrderByMobile,
+  ORDER_LOOKUP_NODE_TYPE,
+  type OrderLookupNodeConfig,
+} from "./order-lookup";
+import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
   type DispatchInboundInput,
@@ -118,7 +123,8 @@ export function isAutoAdvancing(node_type: string): boolean {
     node_type === "send_message" ||
     node_type === "send_media" ||
     node_type === "condition" ||
-    node_type === "set_tag"
+    node_type === "set_tag" ||
+    node_type === ORDER_LOOKUP_NODE_TYPE
   );
 }
 
@@ -704,6 +710,44 @@ async function advanceFromNodeKey(
         condition_result: branch,
         advancing_to: currentKey,
       });
+      continue;
+    }
+    if (node.node_type === ORDER_LOOKUP_NODE_TYPE) {
+      const cfg = node.config as unknown as OrderLookupNodeConfig;
+      const mobile = run.vars[cfg.mobile_var];
+      try {
+        const result =
+          typeof mobile === "string" && mobile.trim().length > 0
+            ? await lookupOrderByMobile(mobile)
+            : { status: "not_found" as const };
+        const newVars = {
+          ...run.vars,
+          lookup_status: result.status,
+          lookup_payment_id:
+            "paymentId" in result ? result.paymentId : undefined,
+        };
+        await db
+          .from("flow_runs")
+          .update({ vars: newVars })
+          .eq("id", run.id);
+        run.vars = newVars;
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          node_type: ORDER_LOOKUP_NODE_TYPE,
+          lookup_status: result.status,
+        });
+        currentKey =
+          result.status === "active"
+            ? cfg.active_next
+            : result.status === "expired"
+              ? cfg.expired_next
+              : cfg.not_found_next;
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "order_lookup_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        currentKey = cfg.not_found_next;
+      }
       continue;
     }
     if (node.node_type === "set_tag") {

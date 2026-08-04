@@ -194,7 +194,11 @@ export type FlowNodeConfig =
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
-  | { node_type: "end"; config: EndNodeConfig };
+  | { node_type: "end"; config: EndNodeConfig }
+  | {
+      node_type: "http_fetch";
+      config: import("./order-lookup").OrderLookupNodeConfig;
+    };
 
 export type FlowNodeType = FlowNodeConfig["node_type"];
 

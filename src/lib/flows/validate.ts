@@ -707,6 +707,51 @@ function validateNode(
       // beyond their existence.
       break;
 
+    case "http_fetch": {
+      // Bespoke order-lookup node (Biodata Support Bot flow) — three
+      // branches instead of one next_node_key. See order-lookup.ts.
+      const cfg = node.config as {
+        mobile_var?: string;
+        active_next?: string;
+        expired_next?: string;
+        not_found_next?: string;
+      };
+      if (!cfg.mobile_var) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "mobile_var",
+          message: "Order lookup needs a mobile variable key.",
+        });
+      }
+      const branches: Array<[string, string | undefined]> = [
+        ["active_next", cfg.active_next],
+        ["expired_next", cfg.expired_next],
+        ["not_found_next", cfg.not_found_next],
+      ];
+      for (const [field, target] of branches) {
+        if (!target) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field,
+            message: `Order lookup's "${field}" needs a target node.`,
+          });
+        } else if (!knownKeys.has(target)) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field,
+            message: `Order lookup's "${field}" points to non-existent node "${target}".`,
+          });
+        }
+      }
+      break;
+    }
+
     default:
       issues.push({
         severity: "error",
@@ -783,6 +828,18 @@ function outgoingEdges(node: NodeInput): string[] {
           if (r.next_node_key) out.push(r.next_node_key);
         }
       }
+      return out;
+    }
+    case "http_fetch": {
+      const cfg = node.config as {
+        active_next?: string;
+        expired_next?: string;
+        not_found_next?: string;
+      };
+      const out: string[] = [];
+      if (cfg.active_next) out.push(cfg.active_next);
+      if (cfg.expired_next) out.push(cfg.expired_next);
+      if (cfg.not_found_next) out.push(cfg.not_found_next);
       return out;
     }
     case "handoff":

@@ -1185,6 +1185,10 @@
         "end": {
           "label": "End",
           "blurb": "Ends the flow"
+        },
+        "http_fetch": {
+          "label": "Order lookup",
+          "blurb": "Looks up the order by mobile number (Postgres)"
         }
       }
     },

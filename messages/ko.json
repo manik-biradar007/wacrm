@@ -1185,6 +1185,10 @@
         "end": {
           "label": "종료",
           "blurb": "플로우를 종료합니다"
+        },
+        "http_fetch": {
+          "label": "주문 조회",
+          "blurb": "전화번호로 주문을 조회합니다 (Postgres)"
         }
       }
     },

@@ -228,6 +228,8 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
 
     case "handoff":
     case "end":
+    case "http_fetch":
+      // Bespoke order-lookup node — not editable on the canvas.
       return [];
   }
 }
@@ -312,6 +314,7 @@ export function applyEdgeConnection(
 
     case "handoff":
     case "end":
+    case "http_fetch":
       return null;
   }
 }
@@ -407,6 +410,24 @@ function patchedConfigWithoutKey(
     case "handoff":
     case "end":
       return null;
+
+    case "http_fetch": {
+      const c = cfg as {
+        active_next?: string;
+        expired_next?: string;
+        not_found_next?: string;
+      };
+      const activeMatch = c.active_next === deletedKey;
+      const expiredMatch = c.expired_next === deletedKey;
+      const notFoundMatch = c.not_found_next === deletedKey;
+      if (!activeMatch && !expiredMatch && !notFoundMatch) return null;
+      return {
+        ...cfg,
+        ...(activeMatch ? { active_next: "" } : {}),
+        ...(expiredMatch ? { expired_next: "" } : {}),
+        ...(notFoundMatch ? { not_found_next: "" } : {}),
+      };
+    }
   }
 }
 

@@ -17,6 +17,7 @@
  */
 
 import {
+  Database,
   Flag,
   GitFork,
   Inbox,
@@ -50,7 +51,8 @@ export type NodeType =
   | 'condition'
   | 'set_tag'
   | 'handoff'
-  | 'end';
+  | 'end'
+  | 'http_fetch';
 
 export interface BuilderNode {
   node_key: string;
@@ -166,6 +168,18 @@ export const NODE_META: Record<
     blurb: 'Ends the flow',
     category: 'flow',
   },
+  // Bespoke order-lookup node for the Biodata Support Bot flow — not
+  // exposed in the "Add node" menu (see ADD_NODE_TYPES), edited via
+  // the API rather than the builder form. Present here only so
+  // NODE_META/NODE_HUE stay total maps and the editor doesn't crash
+  // when it renders a flow containing one.
+  http_fetch: {
+    label: 'Order lookup',
+    icon: Database,
+    color: 'text-orange-400',
+    blurb: 'Looks up the order by mobile number (Postgres)',
+    category: 'logic',
+  },
 };
 
 /**
@@ -207,6 +221,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
   end: { l: 0.55, c: 0.01, h: 260 }, // neutral grey — terminal
+  http_fetch: { l: 0.7, c: 0.15, h: 45 }, // orange — external lookup
 };
 
 export interface NodeColors {
@@ -313,6 +328,7 @@ export function summarizeNode(
   switch (node.node_type) {
     case 'start':
     case 'end':
+    case 'http_fetch':
       return null;
     case 'send_message': {
       const text = typeof cfg.text === 'string' ? cfg.text : '';
