@@ -173,3 +173,8 @@ rather than here. Details in
 ## License
 
 [MIT](./LICENSE). Fork it, brand it, host it.
+
+
+## BACKUP Supabase:
+npm run backup:supabase
+bash scripts/backup-supabase.sh

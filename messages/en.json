@@ -1188,6 +1188,10 @@
           "label": "Tag contact",
           "blurb": "Adds or removes a contact tag"
         },
+        "wait": {
+          "label": "Wait",
+          "blurb": "Pauses before continuing"
+        },
         "handoff": {
           "label": "Handoff to agent",
           "blurb": "Hands the conversation to a human"
