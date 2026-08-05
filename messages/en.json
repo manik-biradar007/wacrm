@@ -202,7 +202,11 @@
       "send": "Send",
       "quickReplyNamePrompt": "Name this quick reply:",
       "quickReplySaved": "Saved as a quick reply.",
-      "quickReplySaveError": "Couldn't save the quick reply."
+      "quickReplySaveError": "Couldn't save the quick reply.",
+      "sendAll": "Send {count}",
+      "clearAll": "Clear all",
+      "dropToAttach": "Drop files to attach",
+      "unsupportedFileType": "{name} isn't a supported file type."
     },
     "bubble": {
       "photo": "Photo",

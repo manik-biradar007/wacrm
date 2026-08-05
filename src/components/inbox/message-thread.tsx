@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { useCan } from "@/hooks/use-can";
 import { usePresence } from "@/hooks/use-presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
 import { presenceLabel } from "@/lib/presence";
@@ -47,6 +48,7 @@ import {
   MessageComposer,
   CHAT_MEDIA_BUCKET,
   type SendMediaPayload,
+  type MessageComposerHandle,
 } from "./message-composer";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
@@ -173,11 +175,26 @@ export function MessageThread({
   const t = useTranslations("Inbox.messageThread");
   const tTimer = useTranslations("Inbox.sessionTimer");
   const tQuote = useTranslations("Inbox.replyQuote");
+  // Drag-drop overlay reuses the composer's attach-related strings rather
+  // than duplicating "drop files to attach" under a second namespace.
+  const tComposer = useTranslations("Inbox.composer");
 
   const { user } = useAuth();
+  const canSend = useCan("send-messages");
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Drag-and-drop attach zone — covers the whole conversation pane rather
+  // than just the composer bar. Staging stays owned by the composer
+  // (same upload/validation path as its pickers); this component only
+  // owns the drop target + overlay and forwards dropped files through
+  // the imperative handle.
+  const composerRef = useRef<MessageComposerHandle>(null);
+  const [dragActive, setDragActive] = useState(false);
+  // Counts nested dragenter/dragleave pairs so the overlay doesn't
+  // flicker as the pointer crosses child element boundaries — only
+  // hide once the count returns to zero.
+  const dragCounterRef = useRef(0);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
@@ -866,6 +883,49 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
+  // Drag-and-drop attach — disabled under the same conditions as the
+  // composer's pickers (read-only role, expired 24h session) so a drop
+  // doesn't silently stage a file nobody can send.
+  const dropDisabled = !canSend || sessionInfo.expired;
+
+  const handleDragEnter = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (dropDisabled || !e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      dragCounterRef.current += 1;
+      setDragActive(true);
+    },
+    [dropDisabled],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (dropDisabled || !e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    [dropDisabled],
+  );
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      dragCounterRef.current = 0;
+      setDragActive(false);
+      if (dropDisabled) return;
+      if (e.dataTransfer.files.length) {
+        composerRef.current?.stageFiles(e.dataTransfer.files);
+      }
+    },
+    [dropDisabled],
+  );
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
@@ -905,7 +965,20 @@ export function MessageThread({
     // clipped and the hover toolbar overlaps the Tags panel. Letting the
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
-    <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
+    <div
+      className={cn("relative flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dragActive && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-primary bg-primary/10 backdrop-blur-[1px]">
+          <div className="rounded-xl bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg">
+            {tComposer("dropToAttach")}
+          </div>
+        </div>
+      )}
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
       <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
@@ -1180,6 +1253,7 @@ export function MessageThread({
 
       {/* Composer */}
       <MessageComposer
+        ref={composerRef}
         conversationId={conversation.id}
         sessionExpired={sessionInfo.expired}
         onSend={handleSend}

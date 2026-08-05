@@ -202,7 +202,11 @@
       "send": "보내기",
       "quickReplyNamePrompt": "이 빠른 답장의 이름을 지정하세요:",
       "quickReplySaved": "빠른 답장으로 저장되었습니다.",
-      "quickReplySaveError": "빠른 답장을 저장하지 못했습니다."
+      "quickReplySaveError": "빠른 답장을 저장하지 못했습니다.",
+      "sendAll": "{count}개 보내기",
+      "clearAll": "모두 지우기",
+      "dropToAttach": "파일을 여기에 놓아 첨부하세요",
+      "unsupportedFileType": "{name}은(는) 지원되지 않는 파일 형식입니다."
     },
     "bubble": {
       "photo": "사진",
