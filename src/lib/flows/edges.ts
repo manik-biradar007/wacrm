@@ -138,6 +138,31 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
         break;
       }
 
+      case "http_fetch": {
+        const c = cfg as {
+          active_next?: string;
+          expired_next?: string;
+          not_found_next?: string;
+        };
+        const branches: Array<[string, string | undefined, string]> = [
+          ["active", c.active_next, "active"],
+          ["expired", c.expired_next, "expired"],
+          ["not_found", c.not_found_next, "not found"],
+        ];
+        for (const [handle, next, label] of branches) {
+          if (next && knownKeys.has(next)) {
+            edges.push({
+              id: `${node.node_key}--${handle}--${next}`,
+              source: node.node_key,
+              target: next,
+              sourceHandle: handle,
+              label,
+            });
+          }
+        }
+        break;
+      }
+
       case "handoff":
       case "end":
         // Terminal nodes — no outgoing edges.
@@ -226,10 +251,17 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
       return slots;
     }
 
+    case "http_fetch":
+      // Bespoke order-lookup node — three real branches (active /
+      // expired / not-found), same shape as `condition`'s true/false.
+      return [
+        { id: "active", label: "active" },
+        { id: "expired", label: "expired" },
+        { id: "not_found", label: "not found" },
+      ];
+
     case "handoff":
     case "end":
-    case "http_fetch":
-      // Bespoke order-lookup node — not editable on the canvas.
       return [];
   }
 }
@@ -312,9 +344,14 @@ export function applyEdgeConnection(
       return matched ? { sections: next } : null;
     }
 
+    case "http_fetch":
+      if (sourceHandle === "active") return { active_next: targetKey };
+      if (sourceHandle === "expired") return { expired_next: targetKey };
+      if (sourceHandle === "not_found") return { not_found_next: targetKey };
+      return null;
+
     case "handoff":
     case "end":
-    case "http_fetch":
       return null;
   }
 }
