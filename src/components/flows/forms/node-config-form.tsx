@@ -195,6 +195,17 @@ export function NodeConfigForm({
         />
       );
 
+    case "wait":
+      return (
+        <WaitForm
+          cfg={cfg as WaitCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
     case "handoff":
       return (
         <TextRow
@@ -860,6 +871,81 @@ function useUserTags(): UserTag[] {
     };
   }, []);
   return tags;
+}
+
+// ============================================================
+// wait
+// ============================================================
+
+interface WaitCfg {
+  duration_value?: number;
+  duration_unit?: "seconds" | "minutes" | "hours";
+  next_node_key?: string;
+}
+
+function WaitForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: WaitCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            {t("waitDurationLabel")}
+          </label>
+          <Input
+            type="number"
+            min={1}
+            value={cfg.duration_value ?? ""}
+            onChange={(e) =>
+              onUpdateConfig({
+                duration_value: e.target.value === "" ? "" : Number(e.target.value),
+              })
+            }
+            className="bg-muted"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            {t("waitUnitLabel")}
+          </label>
+          <Select
+            value={cfg.duration_unit ?? "minutes"}
+            onValueChange={(v) =>
+              onUpdateConfig({ duration_unit: v as WaitCfg["duration_unit"] })
+            }
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="seconds">{t("waitUnitSeconds")}</SelectItem>
+              <SelectItem value="minutes">{t("waitUnitMinutes")}</SelectItem>
+              <SelectItem value="hours">{t("waitUnitHours")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="mt-1 text-[10px] text-muted-foreground">{t("waitHelp")}</p>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
+      />
+    </>
+  );
 }
 
 // ============================================================

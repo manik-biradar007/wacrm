@@ -1129,6 +1129,12 @@
         "removeTag": "태그 제거",
         "tagUuidPlaceholder": "태그 UUID",
         "thenAdvanceTo": "이후 다음 진행",
+        "waitDurationLabel": "대기 시간",
+        "waitUnitLabel": "단위",
+        "waitUnitSeconds": "초",
+        "waitUnitMinutes": "분",
+        "waitUnitHours": "시간",
+        "waitHelp": "실제 재개 시점은 서버가 대기 완료 여부를 확인하는 주기에 따라 달라집니다.",
         "mediaTypeLabel": "미디어 유형",
         "imageLabel": "이미지 (PNG, JPEG, WebP)",
         "videoLabel": "동영상 (MP4, 3GP)",
@@ -1224,7 +1230,11 @@
       "modeAdd": "추가",
       "modeRemove": "제거",
       "tagPicked": "{tag} 태그 {mode}…",
-      "tagNone": "태그 {mode} (선택된 태그 없음)"
+      "tagNone": "태그 {mode} (선택된 태그 없음)",
+      "waitSummary": "{value}{unit} 대기",
+      "waitUnit_seconds": "초",
+      "waitUnit_minutes": "분",
+      "waitUnit_hours": "시간"
     }
   },
   "Settings": {

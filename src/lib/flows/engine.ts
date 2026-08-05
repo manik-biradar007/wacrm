@@ -62,6 +62,7 @@ import {
   type SendMessageNodeConfig,
   type SetTagNodeConfig,
   type StartNodeConfig,
+  type WaitNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
 
@@ -135,6 +136,16 @@ export function isSuspending(node_type: string): boolean {
     node_type === "send_list" ||
     node_type === "collect_input"
   );
+}
+
+/**
+ * Nodes that suspend awaiting a *timer* rather than a customer reply.
+ * Distinct from `isSuspending` because a wait-parked run never sent a
+ * prompt — `handleReplyForActiveRun` must not treat an inbound message
+ * during a wait as a mismatched reply worth reprompting/falling back on.
+ */
+export function isDelaying(node_type: string): boolean {
+  return node_type === "wait";
 }
 
 /** Nodes that end the run. */
@@ -641,6 +652,42 @@ async function advanceFromNodeKey(
       currentKey = cfg.next_node_key;
       continue;
     }
+    if (node.node_type === "wait") {
+      // Park the run rather than continuing synchronously — resumed by
+      // `resumeDueWaits` once `resume_at` has passed. Mirrors the
+      // send_buttons/send_list "suspend + advanceCurrentNodeKey" shape
+      // below, just parked on a timer instead of a customer reply.
+      const cfg = node.config as unknown as WaitNodeConfig;
+      const multiplier =
+        cfg.duration_unit === "hours"
+          ? 3600
+          : cfg.duration_unit === "minutes"
+            ? 60
+            : 1;
+      const resumeAt = new Date(
+        Date.now() + cfg.duration_value * multiplier * 1000,
+      ).toISOString();
+      await db
+        .from("flow_runs")
+        .update({ resume_at: resumeAt })
+        .eq("id", run.id);
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        node_type: "wait",
+        resume_at: resumeAt,
+      });
+      const advanced = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (!advanced) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
+    }
     if (node.node_type === "collect_input") {
       // Send the prompt and suspend. Customer's next TEXT reply will
       // wake us up via handleReplyForActiveRun's collect_input branch.
@@ -968,6 +1015,16 @@ async function handleReplyForActiveRun(
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
+  // A run parked at a `wait` node never sent a prompt, so an inbound
+  // message here isn't a "reply" to anything — falling through to the
+  // fallback policy below would silently no-op the reprompt branch
+  // (no node_type case matches "wait") while still counting toward the
+  // handoff/end threshold. Just let it pass through uninvolved; the
+  // cron sweep resumes the run on its own schedule regardless.
+  if (currentNode.node_type === "wait") {
+    return { consumed: false, flow_run_id: run.id, outcome: "no_match" };
+  }
+
   // Two ways a reply can advance:
   //   1. Interactive button/list tap on a send_buttons/send_list node.
   //   2. Text reply on a collect_input node — capture into vars.
@@ -1164,4 +1221,56 @@ async function startNewRun(
     flow_run_id: run.id,
     outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
   };
+}
+
+/**
+ * Advances every run parked at a `wait` node whose `resume_at` has
+ * passed. Called by `/api/flows/cron` alongside its existing timeout
+ * sweep — see migration 037's `idx_flow_runs_active_resume`.
+ *
+ * Each row is handled independently: a bad row (stale/inconsistent
+ * current_node_key) just gets its `resume_at` cleared rather than
+ * failing the whole sweep, so one bad run can't block every other
+ * customer's wait from resuming on schedule.
+ */
+export async function resumeDueWaits(
+  db: AdminClient,
+): Promise<{ resumed: number }> {
+  const { data, error } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("status", "active")
+    .not("resume_at", "is", null)
+    .lte("resume_at", new Date().toISOString());
+  if (error) {
+    console.error("[flows] resumeDueWaits scan error:", error.message);
+    return { resumed: 0 };
+  }
+
+  let resumed = 0;
+  for (const run of (data ?? []) as FlowRunRow[]) {
+    const nodes = await loadAllNodes(db, run.flow_id);
+    const waitNode = run.current_node_key
+      ? (nodes.get(run.current_node_key) ?? null)
+      : null;
+    if (!waitNode || waitNode.node_type !== "wait") {
+      // Row is stale/inconsistent (e.g. the node was deleted/retyped
+      // out from under a parked run) — clear resume_at so it stops
+      // being rescanned every sweep instead of spinning forever.
+      await db.from("flow_runs").update({ resume_at: null }).eq("id", run.id);
+      await logEvent(db, run.id, "error", run.current_node_key, {
+        reason: "wait_resume_node_mismatch",
+      });
+      continue;
+    }
+    const cfg = waitNode.config as unknown as WaitNodeConfig;
+    await db.from("flow_runs").update({ resume_at: null }).eq("id", run.id);
+    await logEvent(db, run.id, "node_entered", waitNode.node_key, {
+      node_type: "wait",
+      resumed: true,
+    });
+    await advanceFromNodeKey(db, run, cfg.next_node_key, nodes);
+    resumed += 1;
+  }
+  return { resumed };
 }

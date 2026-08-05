@@ -701,6 +701,63 @@ function validateNode(
       break;
     }
 
+    case "wait": {
+      const cfg = node.config as {
+        duration_value?: number;
+        duration_unit?: "seconds" | "minutes" | "hours";
+        next_node_key?: string;
+      };
+      const multiplier =
+        cfg.duration_unit === "hours" ? 3600 : cfg.duration_unit === "minutes" ? 60 : 1;
+      if (typeof cfg.duration_value !== "number" || cfg.duration_value <= 0) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "duration_value",
+          message: "Wait needs a duration greater than zero.",
+        });
+      } else if (cfg.duration_value * multiplier > 30 * 24 * 3600) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "duration_value",
+          message: "Wait can't be longer than 30 days.",
+        });
+      }
+      if (
+        !cfg.duration_unit ||
+        !["seconds", "minutes", "hours"].includes(cfg.duration_unit)
+      ) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "duration_unit",
+          message: "Wait needs a duration unit (seconds, minutes, or hours).",
+        });
+      }
+      if (!cfg.next_node_key) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: "Wait must point to a next node.",
+        });
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `Wait points to non-existent node "${cfg.next_node_key}".`,
+        });
+      }
+      break;
+    }
+
     case "handoff":
     case "end":
       // Terminal nodes have no outgoing edges; nothing to validate
@@ -796,7 +853,8 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_message":
     case "send_media":
     case "collect_input":
-    case "set_tag": {
+    case "set_tag":
+    case "wait": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
     }

@@ -4,6 +4,7 @@ import {
   matchesKeywordTrigger,
   isAutoAdvancing,
   isSuspending,
+  isDelaying,
   isTerminal,
   evaluateConditionPredicate,
 } from "./engine";
@@ -177,7 +178,14 @@ describe("node classification helpers", () => {
     expect(isTerminal("condition")).toBe(false);
   });
 
-  it("the three classifications are mutually exclusive for known node types", () => {
+  it("isDelaying covers wait", () => {
+    expect(isDelaying("wait")).toBe(true);
+    expect(isDelaying("send_message")).toBe(false);
+    expect(isDelaying("send_buttons")).toBe(false);
+    expect(isDelaying("collect_input")).toBe(false);
+  });
+
+  it("the four classifications are mutually exclusive for known node types", () => {
     const types = [
       "start",
       "send_message",
@@ -187,12 +195,18 @@ describe("node classification helpers", () => {
       "collect_input",
       "condition",
       "set_tag",
+      "wait",
       "handoff",
       "end",
     ];
     for (const t of types) {
-      const flags = [isAutoAdvancing(t), isSuspending(t), isTerminal(t)];
-      // Exactly one of the three should be true for every known node.
+      const flags = [
+        isAutoAdvancing(t),
+        isSuspending(t),
+        isDelaying(t),
+        isTerminal(t),
+      ];
+      // Exactly one of the four should be true for every known node.
       expect(flags.filter(Boolean).length).toBe(1);
     }
   });

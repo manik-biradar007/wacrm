@@ -1129,6 +1129,12 @@
         "removeTag": "Remove tag",
         "tagUuidPlaceholder": "Tag UUID",
         "thenAdvanceTo": "Then advance to",
+        "waitDurationLabel": "Duration",
+        "waitUnitLabel": "Unit",
+        "waitUnitSeconds": "Seconds",
+        "waitUnitMinutes": "Minutes",
+        "waitUnitHours": "Hours",
+        "waitHelp": "Actual resume time depends on how often your server checks for due waits.",
         "mediaTypeLabel": "Media type",
         "imageLabel": "Image (PNG, JPEG, WebP)",
         "videoLabel": "Video (MP4, 3GP)",
@@ -1224,7 +1230,11 @@
       "modeAdd": "Add",
       "modeRemove": "Remove",
       "tagPicked": "{mode} tag {tag}…",
-      "tagNone": "{mode} tag (none picked)"
+      "tagNone": "{mode} tag (none picked)",
+      "waitSummary": "Wait {value} {unit}",
+      "waitUnit_seconds": "seconds",
+      "waitUnit_minutes": "minutes",
+      "waitUnit_hours": "hours"
     }
   },
   "Settings": {

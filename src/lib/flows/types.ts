@@ -97,6 +97,21 @@ export interface SendMediaNodeConfig {
   next_node_key: string;
 }
 
+/**
+ * Pauses the run for a configured duration before advancing, instead
+ * of the engine's usual synchronous-to-completion dispatch. Picked
+ * back up by the `/api/flows/cron` sweep once `flow_runs.resume_at`
+ * has passed — see `resumeDueWaits` in engine.ts. Stored as a
+ * value+unit pair (rather than raw seconds) so the builder form
+ * round-trips the exact number the author typed.
+ */
+export interface WaitNodeConfig {
+  duration_value: number;
+  duration_unit: "seconds" | "minutes" | "hours";
+  /** Node to advance to once the wait elapses. */
+  next_node_key: string;
+}
+
 export interface HandoffNodeConfig {
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
@@ -193,6 +208,7 @@ export type FlowNodeConfig =
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
+  | { node_type: "wait"; config: WaitNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
   | { node_type: "end"; config: EndNodeConfig }
   | {
@@ -277,6 +293,8 @@ export interface FlowRunRow {
     | "failed";
   current_node_key: string | null;
   last_prompt_message_id: string | null;
+  /** Set while parked at a `wait` node; null otherwise (migration 037). */
+  resume_at: string | null;
   vars: Record<string, unknown>;
   reprompt_count: number;
   started_at: string;

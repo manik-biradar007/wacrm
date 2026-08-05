@@ -2,19 +2,27 @@ import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
+import { resumeDueWaits } from '@/lib/flows/engine'
 
 /**
- * Sweep abandoned active flow runs.
+ * Sweep abandoned active flow runs, then resume any run parked at a
+ * `wait` node whose timer has elapsed.
  *
- * Reads each active run's parent-flow `fallback_policy.on_timeout_hours`
- * to compute the staleness cutoff (default 24h), then marks any run
- * past its cutoff as `timed_out`. Writes a matching `flow_run_events`
- * row for the audit trail.
+ * Timeout sweep: reads each active run's parent-flow
+ * `fallback_policy.on_timeout_hours` to compute the staleness cutoff
+ * (default 24h), then marks any run past its cutoff as `timed_out`.
+ * Writes a matching `flow_run_events` row for the audit trail.
  *
  * Without this sweep, a customer who abandons a flow mid-conversation
  * keeps a row in `idx_one_active_run_per_contact` (the partial unique
  * index on `flow_runs WHERE status='active'`) forever — blocking any
  * new triggers for them. The cron is therefore not optional.
+ *
+ * Wait resume: `resumeDueWaits` (engine.ts) advances every run whose
+ * `resume_at` has passed — the only mechanism that continues a `wait`
+ * node's flow, since the engine otherwise only advances in response to
+ * an inbound webhook. This makes wait-node precision dependent on how
+ * often this endpoint is actually hit — see the hosting note below.
  *
  * Auth: re-uses `AUTOMATION_CRON_SECRET` so operators only have one
  * secret to provision. The two endpoints (`/api/automations/cron`
@@ -22,9 +30,11 @@ import { resolveFallbackPolicy } from '@/lib/flows/fallback'
  * URLs so one failing doesn't block the other.
  *
  * Hosting: hit on a schedule (Vercel Cron / GitHub Actions / external
- * pinger). A 5-minute interval is more than enough for a 24h timeout
- * default; once per hour would also be acceptable for low-volume
- * tenants.
+ * pinger). A 5-minute interval is more than enough for the 24h timeout
+ * sweep, but now also bounds wait-node precision — a flow with a
+ * 2-minute wait will actually resume anywhere in [2, interval+2)
+ * minutes. Tighten the interval if wait nodes need to be closer to
+ * exact.
  */
 export async function GET(request: Request) {
   const expected = process.env.AUTOMATION_CRON_SECRET
@@ -108,5 +118,7 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ swept })
+  const { resumed } = await resumeDueWaits(admin)
+
+  return NextResponse.json({ swept, resumed })
 }
