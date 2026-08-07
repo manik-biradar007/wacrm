@@ -850,6 +850,7 @@
         "send_buttons": "버튼 보내기",
         "send_list": "목록 보내기",
         "send_template": "템플릿 보내기",
+        "send_media": "미디어 보내기",
         "add_tag": "태그 추가",
         "remove_tag": "태그 제거",
         "assign_conversation": "대화 담당자 지정",
@@ -997,7 +998,19 @@
         "matchWord": "단어 단위 일치",
         "matchWordHint": "키워드가 독립된 단어일 때만 일치하므로 \"k\"가 \"thanks\"에서 실행되지 않습니다. 공백으로 단어를 구분하는 언어의 짧은 키워드에 적합하며, 공백 없이 표기하는 언어에는 \"포함\"을 사용하세요.",
         "matchExact": "정확히 일치",
-        "closeConversationHint": "대화 상태를 \"닫힘\"으로 설정합니다. 추가 설정이 필요 없습니다."
+        "closeConversationHint": "대화 상태를 \"닫힘\"으로 설정합니다. 추가 설정이 필요 없습니다.",
+        "media": {
+          "mediaTypeLabel": "미디어 유형",
+          "imageLabel": "이미지 (PNG, JPEG, WebP)",
+          "videoLabel": "동영상 (MP4, 3GP)",
+          "documentLabel": "문서 (PDF, Word, Excel, PowerPoint, TXT)",
+          "fileLabel": "파일",
+          "removeFile": "파일 제거",
+          "uploading": "업로드 중…",
+          "clickToUpload": "클릭하여 업로드 (최대 16MB)",
+          "captionLabel": "캡션 (선택, 미디어 아래에 표시됨)",
+          "filenameLabel": "고객에게 표시될 파일명 (문서 전용)"
+        }
       }
     }
   },

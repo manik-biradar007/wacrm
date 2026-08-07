@@ -850,6 +850,7 @@
         "send_buttons": "Send Buttons",
         "send_list": "Send List",
         "send_template": "Send Template",
+        "send_media": "Send Media",
         "add_tag": "Add Tag",
         "remove_tag": "Remove Tag",
         "assign_conversation": "Assign Conversation",
@@ -997,7 +998,19 @@
         "matchWord": "Whole word",
         "matchWordHint": "Matches the keyword only as a standalone word, so \"k\" no longer fires on \"thanks\". Best for short keywords in space-separated languages; use Contains for languages written without spaces.",
         "matchExact": "Exact",
-        "closeConversationHint": "Sets the conversation status to \"closed\". No configuration needed."
+        "closeConversationHint": "Sets the conversation status to \"closed\". No configuration needed.",
+        "media": {
+          "mediaTypeLabel": "Media type",
+          "imageLabel": "Image (PNG, JPEG, WebP)",
+          "videoLabel": "Video (MP4, 3GP)",
+          "documentLabel": "Document (PDF, Word, Excel, PowerPoint, TXT)",
+          "fileLabel": "File",
+          "removeFile": "Remove file",
+          "uploading": "Uploading…",
+          "clickToUpload": "Click to upload (max 16 MB)",
+          "captionLabel": "Caption (optional, shown under the media)",
+          "filenameLabel": "Filename shown to the customer (documents only)"
+        }
       }
     }
   },

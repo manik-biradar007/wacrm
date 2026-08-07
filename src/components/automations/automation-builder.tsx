@@ -2,8 +2,10 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -33,6 +35,9 @@ import {
   ArrowUp,
   MousePointerClick,
   List,
+  Paperclip,
+  Upload,
+  X,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -62,6 +67,7 @@ import {
 } from "@/components/interactive/interactive-builder"
 import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
 import { createClient } from "@/lib/supabase/client"
+import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media"
 import { cn } from "@/lib/utils"
 
 // ------------------------------------------------------------
@@ -102,6 +108,7 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   send_buttons: { label: "send_buttons", icon: MousePointerClick, border: "border-l-primary" },
   send_list: { label: "send_list", icon: List, border: "border-l-primary" },
   send_template: { label: "send_template", icon: FileText, border: "border-l-primary" },
+  send_media: { label: "send_media", icon: Paperclip, border: "border-l-primary" },
   add_tag: { label: "add_tag", icon: Tag, border: "border-l-primary" },
   remove_tag: { label: "remove_tag", icon: TagIcon, border: "border-l-primary" },
   assign_conversation: { label: "assign_conversation", icon: UserCheck, border: "border-l-primary" },
@@ -118,6 +125,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "send_buttons",
   "send_list",
   "send_template",
+  "send_media",
   "add_tag",
   "remove_tag",
   "assign_conversation",
@@ -171,6 +179,8 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
       return toStepConfig(blankListPayload())
     case "send_template":
       return { template_name: "", language: "en_US" }
+    case "send_media":
+      return { media_type: "image", media_url: "", caption: "", filename: "" }
     case "add_tag":
     case "remove_tag":
       return { tag_id: "" }
@@ -616,6 +626,171 @@ function SendTemplateFields({
         )}
       </select>
     </FieldBlock>
+  )
+}
+
+/** Mirrors the bucket's allowed_mime_types (migration 038). Kept in sync
+ *  with the storage policy so the picker rejects unsupported files before
+ *  they hit the network. Same list as the Flows builder's send_media node. */
+const MEDIA_ACCEPT: Record<"image" | "video" | "document", string> = {
+  image: "image/png,image/jpeg,image/webp",
+  video: "video/mp4,video/3gpp",
+  document:
+    "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain",
+}
+
+const AUTOMATION_MEDIA_BUCKET = "automation-media"
+
+/** Media picker for the `send_media` step — upload → automation-media
+ *  bucket, then media type / caption / filename fields. Mirrors
+ *  `SendMediaForm` in the Flows builder (`node-config-form.tsx`), just
+ *  wired to this file's `set()` patch pattern instead of Flows'
+ *  `onUpdateConfig`. */
+function SendMediaFields({
+  mediaType,
+  mediaUrl,
+  caption,
+  filename,
+  onChange,
+  t,
+}: {
+  mediaType: "image" | "video" | "document"
+  mediaUrl: string
+  caption: string
+  filename: string
+  onChange: (patch: {
+    media_type?: "image" | "video" | "document"
+    media_url?: string
+    caption?: string
+    filename?: string
+  }) => void
+  t: ReturnType<typeof useTranslations>
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const isDocument = mediaType === "document"
+  const displayName = filename || (mediaUrl ? mediaUrl.split("/").pop() ?? "" : "")
+
+  const handleFile = useCallback(
+    async (file: File) => {
+      if (file.size > MEDIA_MAX_BYTES) {
+        toast.error(
+          `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — limit is 16 MB.`,
+        )
+        return
+      }
+      setUploading(true)
+      try {
+        const { publicUrl } = await uploadAccountMedia(AUTOMATION_MEDIA_BUCKET, file)
+        onChange({ media_url: publicUrl, filename: file.name })
+        toast.success("File uploaded.")
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Upload failed.")
+      } finally {
+        setUploading(false)
+      }
+    },
+    [onChange],
+  )
+
+  return (
+    <>
+      <FieldBlock label={t("config.media.mediaTypeLabel")}>
+        <select
+          value={mediaType}
+          onChange={(e) => {
+            // Changing type clears the file — the bucket accepts different
+            // MIME sets per type and a previously uploaded PDF can't be
+            // sent as an image.
+            onChange({
+              media_type: e.target.value as "image" | "video" | "document",
+              media_url: "",
+              filename: "",
+            })
+          }}
+          className={SELECT_CLASS}
+        >
+          <option value="image">{t("config.media.imageLabel")}</option>
+          <option value="video">{t("config.media.videoLabel")}</option>
+          <option value="document">{t("config.media.documentLabel")}</option>
+        </select>
+      </FieldBlock>
+
+      <FieldBlock label={t("config.media.fileLabel")}>
+        {mediaUrl ? (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs">
+            <Paperclip className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <a
+              href={mediaUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-w-0 flex-1 truncate text-foreground hover:text-primary"
+              title={displayName || mediaUrl}
+            >
+              {displayName || mediaUrl}
+            </a>
+            <button
+              type="button"
+              onClick={() => onChange({ media_url: "", filename: "" })}
+              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label={t("config.media.removeFile")}
+              disabled={uploading}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-border bg-card px-3 py-4 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {uploading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t("config.media.uploading")}
+              </>
+            ) : (
+              <>
+                <Upload className="h-3.5 w-3.5" />
+                {t("config.media.clickToUpload")}
+              </>
+            )}
+          </button>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={MEDIA_ACCEPT[mediaType]}
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void handleFile(f)
+            e.target.value = ""
+          }}
+        />
+      </FieldBlock>
+
+      <FieldBlock label={t("config.media.captionLabel")}>
+        <Textarea
+          value={caption}
+          onChange={(e) => onChange({ caption: e.target.value })}
+          className="min-h-16 bg-muted text-foreground"
+        />
+      </FieldBlock>
+
+      {isDocument && (
+        <FieldBlock label={t("config.media.filenameLabel")}>
+          <Input
+            value={filename}
+            onChange={(e) => onChange({ filename: e.target.value })}
+            placeholder="invoice.pdf"
+            className="bg-muted text-foreground"
+          />
+        </FieldBlock>
+      )}
+    </>
   )
 }
 
@@ -1327,6 +1502,17 @@ function StepEditor({
           t={t}
         />
       )
+    case "send_media":
+      return (
+        <SendMediaFields
+          mediaType={(cfg.media_type as "image" | "video" | "document") ?? "image"}
+          mediaUrl={(cfg.media_url as string) ?? ""}
+          caption={(cfg.caption as string) ?? ""}
+          filename={(cfg.filename as string) ?? ""}
+          onChange={(patch) => set(patch)}
+          t={t}
+        />
+      )
     case "add_tag":
     case "remove_tag":
       return (
@@ -1529,6 +1715,12 @@ function previewFor(step: BuilderStep): string {
       return interactivePayloadPreviewText(asInteractive(step.step_config)) || "no body yet"
     case "send_template":
       return (step.step_config.template_name as string) || "pick a template"
+    case "send_media": {
+      const url = step.step_config.media_url as string | undefined
+      if (!url) return "no file yet"
+      const filename = (step.step_config.filename as string) || url.split("/").pop() || "file"
+      return filename
+    }
     case "wait":
       return `${step.step_config.amount ?? "?"} ${step.step_config.unit ?? ""}`
     case "condition":

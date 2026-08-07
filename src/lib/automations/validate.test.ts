@@ -196,6 +196,36 @@ describe("validateStepsForActivation", () => {
     ]);
   });
 
+  it("validates send_media steps", () => {
+    const good = validateStepsForActivation([
+      {
+        step_type: "send_media",
+        step_config: { media_type: "image", media_url: "https://example.com/a.png" },
+      },
+    ]);
+    expect(good).toEqual([]);
+
+    const issues = validateStepsForActivation([
+      { step_type: "send_media", step_config: { media_type: "audio" } },
+    ]);
+    expect(issues.map((i) => i.path)).toEqual([
+      "steps[0].media_type",
+      "steps[0].media_url",
+    ]);
+
+    const captionTooLong = validateStepsForActivation([
+      {
+        step_type: "send_media",
+        step_config: {
+          media_type: "image",
+          media_url: "https://example.com/a.png",
+          caption: "x".repeat(1025),
+        },
+      },
+    ]);
+    expect(captionTooLong.map((i) => i.path)).toEqual(["steps[0].caption"]);
+  });
+
   it("flags condition subject/operand independently", () => {
     const issues = validateStepsForActivation([
       { step_type: "condition", step_config: {} },

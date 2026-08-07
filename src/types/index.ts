@@ -446,6 +446,7 @@ export type AutomationStepType =
   | 'send_buttons'
   | 'send_list'
   | 'send_template'
+  | 'send_media'
   | 'add_tag'
   | 'remove_tag'
   | 'assign_conversation'
@@ -513,6 +514,16 @@ export interface SendTemplateStepConfig {
   variables?: Record<string, string>;
 }
 
+export interface SendMediaStepConfig {
+  media_type: 'image' | 'video' | 'document';
+  /** Public URL Meta will fetch. Uploaded via the automation builder's file picker. */
+  media_url: string;
+  /** Optional caption; supports the same {{vars.*}} / {{message.text}} interpolation as send_message. */
+  caption?: string;
+  /** Filename shown in the recipient's chat. Documents only. */
+  filename?: string;
+}
+
 export interface TagStepConfig {
   tag_id: string;
 }
@@ -572,6 +583,7 @@ export type AutomationStepConfig =
   | SendButtonsStepConfig
   | SendListStepConfig
   | SendTemplateStepConfig
+  | SendMediaStepConfig
   | TagStepConfig
   | AssignConversationStepConfig
   | UpdateContactFieldStepConfig

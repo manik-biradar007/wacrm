@@ -1,5 +1,6 @@
 import type { AutomationTriggerType } from '@/types'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
+import { INTERACTIVE_LIMITS } from '@/lib/whatsapp/meta-api'
 
 // ------------------------------------------------------------
 // Pre-flight config validation for automations about to be activated.
@@ -72,6 +73,23 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
     case 'send_template':
       if (!nonEmpty(c.template_name)) {
         issues.push({ path: `${path}.template_name`, message: 'template name is required' })
+      }
+      break
+    case 'send_media':
+      if (!['image', 'video', 'document'].includes(String(c.media_type))) {
+        issues.push({
+          path: `${path}.media_type`,
+          message: 'media type must be image, video, or document',
+        })
+      }
+      if (!nonEmpty(c.media_url)) {
+        issues.push({ path: `${path}.media_url`, message: 'a file is required' })
+      }
+      if (typeof c.caption === 'string' && c.caption.length > INTERACTIVE_LIMITS.bodyMaxLength) {
+        issues.push({
+          path: `${path}.caption`,
+          message: `caption exceeds ${INTERACTIVE_LIMITS.bodyMaxLength} chars (WhatsApp limit)`,
+        })
       }
       break
     case 'add_tag':
