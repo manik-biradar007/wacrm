@@ -908,6 +908,7 @@
       "activeAria": "Active",
       "save": "Save",
       "saveDraft": "Save Draft",
+      "delete": "Delete",
       "untitled": "Untitled automation",
       "backToAutomations": "Back to automations",
       "toasts": {
