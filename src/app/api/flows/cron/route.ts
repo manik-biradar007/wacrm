@@ -1,8 +1,8 @@
-import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
 import { resumeDueWaits } from '@/lib/flows/engine'
+import { isAuthorizedCronRequest } from '@/lib/cron-auth'
 
 /**
  * Sweep abandoned active flow runs, then resume any run parked at a
@@ -24,8 +24,11 @@ import { resumeDueWaits } from '@/lib/flows/engine'
  * an inbound webhook. This makes wait-node precision dependent on how
  * often this endpoint is actually hit — see the hosting note below.
  *
- * Auth: re-uses `AUTOMATION_CRON_SECRET` so operators only have one
- * secret to provision. The two endpoints (`/api/automations/cron`
+ * Auth: accepts either Vercel Cron's auto-sent `Authorization: Bearer
+ * $CRON_SECRET` (see `vercel.json`) or the GitHub Actions workflow's
+ * `x-cron-secret: $AUTOMATION_CRON_SECRET` — see `isAuthorizedCronRequest`.
+ * Kept as two redundant pingers since GitHub's schedule trigger alone
+ * has proven unreliable. The two endpoints (`/api/automations/cron`
  * and this one) are independent operations; we keep them on separate
  * URLs so one failing doesn't block the other.
  *
@@ -37,21 +40,7 @@ import { resumeDueWaits } from '@/lib/flows/engine'
  * exact.
  */
 export async function GET(request: Request) {
-  const expected = process.env.AUTOMATION_CRON_SECRET
-  if (!expected) {
-    return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
-  }
-  // Constant-time compare so an attacker who can hit the endpoint
-  // can't recover the secret byte-by-byte from response-time deltas.
-  // Length pre-check is required by timingSafeEqual (throws otherwise)
-  // and leaks only the length itself, which isn't sensitive.
-  const supplied = request.headers.get('x-cron-secret') ?? ''
-  const suppliedBuf = Buffer.from(supplied)
-  const expectedBuf = Buffer.from(expected)
-  if (
-    suppliedBuf.length !== expectedBuf.length ||
-    !timingSafeEqual(suppliedBuf, expectedBuf)
-  ) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
