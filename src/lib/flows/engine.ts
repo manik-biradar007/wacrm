@@ -47,6 +47,7 @@ import {
   ORDER_LOOKUP_NODE_TYPE,
   type OrderLookupNodeConfig,
 } from "./order-lookup";
+import { classifyIntent, type IntentCandidate } from "./intent-classifier";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -93,6 +94,35 @@ export function matchReplyId(
     return null;
   }
   return null;
+}
+
+/**
+ * Flatten a send_buttons/send_list node's options into the shape the
+ * AI intent classifier needs. Mirrors the shapes `matchReplyId` reads.
+ */
+export function collectCandidates(node: {
+  node_type: string;
+  config: Record<string, unknown>;
+}): IntentCandidate[] {
+  if (node.node_type === "send_buttons") {
+    const cfg = node.config as unknown as SendButtonsNodeConfig;
+    return (cfg.buttons ?? []).map((b) => ({
+      reply_id: b.reply_id,
+      title: b.title,
+      next_node_key: b.next_node_key,
+    }));
+  }
+  if (node.node_type === "send_list") {
+    const cfg = node.config as unknown as SendListNodeConfig;
+    return (cfg.sections ?? []).flatMap((section) =>
+      (section.rows ?? []).map((r) => ({
+        reply_id: r.reply_id,
+        title: r.title,
+        next_node_key: r.next_node_key,
+      })),
+    );
+  }
+  return [];
 }
 
 /**
@@ -1068,6 +1098,49 @@ async function handleReplyForActiveRun(
     }
   }
 
+  // Resolved once here so both the AI gate below and the fallback
+  // branch further down (if AI doesn't resolve it) share one lookup.
+  const policy = resolveFallbackPolicy(
+    (await loadFlow(db, run.flow_id))?.fallback_policy,
+  );
+
+  // Customer typed free text instead of tapping a button/list option —
+  // ask the account's configured LLM (if any) whether it means one of
+  // the current node's options, in any language/mix (English, Hindi,
+  // Marathi, Hinglish, Minglish). Gated by the same reprompt budget as
+  // the regex fallback so a chronically-mismatched menu doesn't burn
+  // AI calls forever. Silently no-ops (falls through unchanged) when
+  // the account has no active AI config, the provider call fails, or
+  // it times out.
+  if (
+    !matched &&
+    message.kind === "text" &&
+    (currentNode.node_type === "send_buttons" ||
+      currentNode.node_type === "send_list") &&
+    run.reprompt_count < policy.max_reprompts
+  ) {
+    const candidates: IntentCandidate[] = collectCandidates(currentNode);
+    const result = await classifyIntent({
+      db,
+      accountId: run.account_id,
+      text: message.text,
+      candidates,
+    });
+    if (result.status === "matched") {
+      matched = result.next_node_key;
+      await logEvent(db, run.id, "fallback_fired", run.current_node_key, {
+        action: "ai_matched",
+        matched_reply_id: result.reply_id,
+      });
+    } else if (result.status === "none") {
+      await logEvent(db, run.id, "fallback_fired", run.current_node_key, {
+        action: "ai_no_match",
+      });
+    }
+    // "unavailable" → no extra event; falls through to the regex
+    // fallback below exactly as if AI had never been attempted.
+  }
+
   if (matched) {
     // Reset reprompt count on a successful match. Skip the write when
     // already 0 — the collect_input capture branch above already
@@ -1091,10 +1164,8 @@ async function handleReplyForActiveRun(
     };
   }
 
-  // No match → fallback. Apply the policy.
-  const policy = resolveFallbackPolicy(
-    (await loadFlow(db, run.flow_id))?.fallback_policy,
-  );
+  // No match → fallback. `policy` was already resolved above (shared
+  // with the AI gate).
   const newReprompts = run.reprompt_count + 1;
   await db
     .from("flow_runs")
