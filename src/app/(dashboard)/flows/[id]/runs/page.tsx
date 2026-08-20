@@ -347,11 +347,23 @@ function EventLine({ ev }: { ev: EventRow }) {
 function summarizePayload(payload: Record<string, unknown>): string {
   // Show the keys that matter most to a human debugger; full JSON is
   // available via the "Captured vars" details panel for the run.
-  const keys = ["reply_id", "captured_key", "reason", "advancing_to"];
+  // `action`/`matched_reply_id` surface the AI intent-classifier's
+  // fallback_fired events (ai_matched / ai_no_match) alongside the
+  // regular reprompt/handoff/end ones — otherwise those look identical
+  // to any other fallback in this timeline.
+  const keys = [
+    "action",
+    "matched_reply_id",
+    "reply_id",
+    "captured_key",
+    "reason",
+    "advancing_to",
+  ];
+  const parts: string[] = [];
   for (const k of keys) {
     if (k in payload && payload[k] !== null && payload[k] !== undefined) {
-      return `${k}=${String(payload[k]).slice(0, 80)}`;
+      parts.push(`${k}=${String(payload[k]).slice(0, 80)}`);
     }
   }
-  return "";
+  return parts.join(" ");
 }

@@ -1166,11 +1166,30 @@ async function handleReplyForActiveRun(
 
   // No match → fallback. `policy` was already resolved above (shared
   // with the AI gate).
+  //
+  // Guarded with the same CAS pattern as advanceCurrentNodeKey: two
+  // near-simultaneous customer messages can each read this run at the
+  // same current_node_key before either commits an advance. If a
+  // sibling request already moved the run on (e.g. it AI-matched and
+  // advanced while this request's own AI call was still in flight),
+  // this reply is superseded — bail out rather than resend a stale
+  // prompt or corrupt reprompt_count with a stale increment.
   const newReprompts = run.reprompt_count + 1;
-  await db
+  const { data: repromptedRows, error: repromptErr } = await db
     .from("flow_runs")
     .update({ reprompt_count: newReprompts })
-    .eq("id", run.id);
+    .eq("id", run.id)
+    .eq("current_node_key", run.current_node_key)
+    .select("id");
+  if (repromptErr) {
+    console.error(
+      "[flows] reprompt_count update error:",
+      repromptErr.message,
+    );
+  }
+  if (!repromptedRows || repromptedRows.length === 0) {
+    return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
 
   const action = decideFallback({ policy, reprompt_count: newReprompts });
   await logEvent(db, run.id, "fallback_fired", run.current_node_key, {
