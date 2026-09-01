@@ -71,6 +71,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.54.2",
+    "@swc/helpers": "^0.5.23",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26",
     "@types/pg": "^8.20.4",
@@ -79,8 +80,10 @@
     "@vinext/cloudflare": "^1.0.0-beta.6",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitejs/plugin-rsc": "^0.5.34",
+    "ajv": "^8.20.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
+    "json-schema-traverse": "^1.0.0",
     "minimizer-webpack-plugin": "^5.8.0",
     "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.8.1",
