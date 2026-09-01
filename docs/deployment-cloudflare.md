@@ -48,7 +48,6 @@ The Worker name is `wacrm`; Wrangler will print the deployed `workers.dev`
 URL. Attach a custom domain from the Worker’s **Domains & Routes** settings.
 
 Before publishing a change, validate the generated bundle with:
-
 ```bash
 npm run build:vinext
 npx wrangler deploy --dry-run --config dist/server/wrangler.json
