@@ -920,7 +920,7 @@ export function MessageThread({
       setDragActive(false);
       if (dropDisabled) return;
       if (e.dataTransfer.files.length) {
-        composerRef.current?.stageFiles(e.dataTransfer.files);
+        composerRef.current?.stageFiles(e.dataTransfer.files, { source: "drop" });
       }
     },
     [dropDisabled],

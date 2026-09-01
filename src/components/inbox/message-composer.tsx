@@ -24,6 +24,7 @@ import {
   Plus,
   MessageSquareDashed,
   Zap,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -149,7 +150,10 @@ interface MessageComposerProps {
  *  it owns the drop target (the whole conversation pane) but staging
  *  logic stays here, next to the pickers that already do the same work. */
 export interface MessageComposerHandle {
-  stageFiles: (files: FileList | File[]) => void;
+  stageFiles: (
+    files: FileList | File[],
+    options?: { source?: "drop" | "picker" },
+  ) => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -162,6 +166,7 @@ function formatDuration(seconds: number): string {
  *  (vendored from opus-recorder into /public). Recording client-side in a
  *  Meta-accepted format means no server ffmpeg / transcode step. */
 const OPUS_ENCODER_PATH = "/opus/encoderWorker.min.js";
+const AUTO_SEND_DROPPED_FILES_KEY = "wacrm.inbox.autoSendDroppedFiles";
 
 export const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
   function MessageComposer(
@@ -197,9 +202,24 @@ export const MessageComposer = forwardRef<MessageComposerHandle, MessageComposer
   const [drafts, setDrafts] = useState<MediaDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [sendingAll, setSendingAll] = useState(false);
+  const [autoSendDroppedFiles, setAutoSendDroppedFiles] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setAutoSendDroppedFiles(
+      window.localStorage.getItem(AUTO_SEND_DROPPED_FILES_KEY) === "true",
+    );
+  }, []);
+
+  const toggleAutoSendDroppedFiles = useCallback((enabled: boolean) => {
+    setAutoSendDroppedFiles(enabled);
+    window.localStorage.setItem(
+      AUTO_SEND_DROPPED_FILES_KEY,
+      String(enabled),
+    );
+  }, []);
   // Mirror of `drafts` for the unmount cleanup, which can't read render
   // state. Kept in sync below so navigating away with staged-but-unsent
   // attachments GCs the orphaned objects.
@@ -421,7 +441,7 @@ export const MessageComposer = forwardRef<MessageComposerHandle, MessageComposer
 
   // Upload a captured file to chat-media and append it as a staged draft.
   const stageUpload = useCallback(
-    async (kind: ComposerMediaKind, file: File) => {
+    async (kind: ComposerMediaKind, file: File): Promise<MediaDraft | null> => {
       // Per-kind ceiling mirrors Meta's caps (image 5 MB, etc.) so we
       // reject before upload rather than orphaning an object that Meta
       // would then refuse at send.
@@ -432,19 +452,19 @@ export const MessageComposer = forwardRef<MessageComposerHandle, MessageComposer
             max / 1024 / 1024,
           )} MB.`,
         );
-        return;
+        return null;
       }
       setBusy(true);
       try {
         const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
-        setDrafts((prev) => [
-          ...prev,
-          { kind, mediaUrl: publicUrl, path, filename: file.name, caption: "" },
-        ]);
+        const draft = { kind, mediaUrl: publicUrl, path, filename: file.name, caption: "" };
+        setDrafts((prev) => [...prev, draft]);
+        return draft;
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : `Upload failed for ${file.name}.`,
         );
+        return null;
       } finally {
         setBusy(false);
       }
@@ -452,13 +472,34 @@ export const MessageComposer = forwardRef<MessageComposerHandle, MessageComposer
     [],
   );
 
+  const sendDrafts = useCallback(async (toSend: MediaDraft[]) => {
+    if (!toSend.length || busy || sendingAll) return;
+    setSendingAll(true);
+    try {
+      for (let i = 0; i < toSend.length; i++) {
+        const d = toSend[i];
+        await onSendMedia({
+          kind: d.kind,
+          mediaUrl: d.mediaUrl,
+          path: d.path,
+          caption: d.kind === "audio" ? undefined : d.caption.trim() || undefined,
+          filename: d.kind === "document" ? d.filename : undefined,
+          replyToId: i === 0 ? replyTo?.id : undefined,
+        });
+      }
+    } finally {
+      setSendingAll(false);
+    }
+    onClearReply?.();
+  }, [busy, sendingAll, onSendMedia, replyTo?.id, onClearReply]);
+
   // Entry point for both the multi-select pickers and drag-and-drop.
   // Infers each file's kind from its MIME type (a drop isn't scoped to a
   // single picker's `accept`), skips unsupported types, and uploads
   // sequentially so the preview strip fills in progressively instead of
   // firing a burst of concurrent Storage uploads.
   const stageFiles = useCallback(
-    (files: FileList | File[]) => {
+    (files: FileList | File[], options?: { source?: "drop" | "picker" }) => {
       if (inputsDisabled) return;
       const list = Array.from(files);
       if (!list.length) return;
@@ -470,17 +511,24 @@ export const MessageComposer = forwardRef<MessageComposerHandle, MessageComposer
       }
 
       void (async () => {
+        const uploaded: MediaDraft[] = [];
         for (const file of toStage) {
           const kind = inferKind(file);
           if (!kind) {
             toast.error(t("unsupportedFileType", { name: file.name }));
             continue;
           }
-          await stageUpload(kind, file);
+          const draft = await stageUpload(kind, file);
+          if (draft) uploaded.push(draft);
+        }
+        if (options?.source === "drop" && autoSendDroppedFiles && uploaded.length) {
+          const uploadedPaths = new Set(uploaded.map((draft) => draft.path));
+          setDrafts((prev) => prev.filter((draft) => !uploadedPaths.has(draft.path)));
+          await sendDrafts(uploaded);
         }
       })();
     },
-    [inputsDisabled, stageUpload, t],
+    [autoSendDroppedFiles, inputsDisabled, sendDrafts, stageUpload, t],
   );
 
   useImperativeHandle(ref, () => ({ stageFiles }), [stageFiles]);
@@ -751,6 +799,16 @@ export const MessageComposer = forwardRef<MessageComposerHandle, MessageComposer
               <DropdownMenuItem onClick={() => void startRecording()}>
                 <Mic className="mr-2 h-4 w-4" />
                 {t("voiceNote")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                role="menuitemcheckbox"
+                aria-checked={autoSendDroppedFiles}
+                onClick={() => toggleAutoSendDroppedFiles(!autoSendDroppedFiles)}
+              >
+                <span className="mr-2 flex h-4 w-4 items-center justify-center">
+                  {autoSendDroppedFiles && <Check className="h-4 w-4" />}
+                </span>
+                {t("autoSendDroppedFiles")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

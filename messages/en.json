@@ -190,6 +190,7 @@
       "video": "Video",
       "document": "Document",
       "voiceNote": "Voice note",
+      "autoSendDroppedFiles": "Auto Send",
       "sendTemplate": "Send template",
       "draftWithAI": "Draft a reply with AI",
       "addCaption": "Add a caption…",
