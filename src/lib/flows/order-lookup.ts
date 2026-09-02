@@ -10,28 +10,7 @@
  * Not a general-purpose HTTP node — see ORDER_LOOKUP_NODE_TYPE below.
  */
 
-import { Pool } from "pg";
-
-let pool: Pool | null = null;
-
-function getPool(): Pool {
-  if (!pool) {
-    pool = new Pool({
-      host: process.env.ORDERS_PG_HOST,
-      port: process.env.ORDERS_PG_PORT
-        ? Number(process.env.ORDERS_PG_PORT)
-        : 5432,
-      database: process.env.ORDERS_PG_DBNAME,
-      user: process.env.ORDERS_PG_USER,
-      password: process.env.ORDERS_PG_PASSWORD,
-      ssl: { rejectUnauthorized: false },
-      max: 3,
-      connectionTimeoutMillis: 5000,
-      idleTimeoutMillis: 10000,
-    });
-  }
-  return pool;
-}
+import { withOrdersClient } from "@/lib/orders/pg";
 
 function normalizeMobile(mobile: string): string {
   const digits = mobile.replace(/\D/g, "");
@@ -60,16 +39,15 @@ export async function lookupOrderByMobile(
   }
 
   try {
-    const { rows } = await getPool().query<{
-      transaction_id: string;
-      created_on: string;
-    }>(
-      `SELECT transaction_id, created_on
-       FROM api.biodata_purchases
-       WHERE right(regexp_replace(mobile, '\\D', '', 'g'), 10) = $1
-       ORDER BY created_on DESC
-       LIMIT 1`,
-      [key],
+    const { rows } = await withOrdersClient((client) =>
+      client.query<{ transaction_id: string; created_on: string }>(
+        `SELECT transaction_id, created_on
+         FROM api.biodata_purchases
+         WHERE right(regexp_replace(mobile, '\\D', '', 'g'), 10) = $1
+         ORDER BY created_on DESC
+         LIMIT 1`,
+        [key],
+      ),
     );
     const order = rows[0];
     if (!order) return { status: "not_found" };

@@ -13,6 +13,7 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
+import { OrderSearchDialog } from "@/components/inbox/order-search-dialog";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,11 @@ function InboxPageInner() {
    * once on conversationId-change as usual.
    */
   const [resyncToken, setResyncToken] = useState(0);
+
+  // Order-search dialog (mobile / UTR / payment-id quick lookup, #shortcut
+  // below) — opened either from the ConversationList header button or via
+  // the Ctrl/Cmd+K shortcut.
+  const [orderSearchOpen, setOrderSearchOpen] = useState(false);
 
   /**
    * Whether the desktop contact sidebar (tags / deals / notes) is shown.
@@ -502,6 +508,46 @@ function InboxPageInner() {
   }, [router]);
 
 
+  // Jump the inbox to a conversation by id, fetched fresh (with its
+  // contact join) rather than relying on it already being in `conversations`
+  // — the order-search dialog can resolve a conversation for a contact this
+  // pane has never loaded. Mirrors handleSelectConversation's side effects.
+  const handleOpenConversationById = useCallback(
+    async (convId: string) => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("conversations")
+        .select(CONVERSATION_SELECT)
+        .eq("id", convId)
+        .maybeSingle();
+      if (!data) return;
+      const conv = normalizeConversation(data);
+      setConversations((prev) => {
+        const exists = prev.some((c) => c.id === conv.id);
+        return exists ? prev.map((c) => (c.id === conv.id ? conv : c)) : [conv, ...prev];
+      });
+      setActiveConversation(conv);
+      setActiveContact(conv.contact ?? null);
+      setMessages([]);
+      autoSelectedForDeepLinkRef.current = conv.id;
+      router.replace(`/inbox?c=${conv.id}`, { scroll: false });
+    },
+    [router],
+  );
+
+  // Ctrl/Cmd+K opens the order-search dialog from anywhere in the inbox,
+  // including while focused in the composer — it's a modifier chord, so
+  // it can't collide with a plain 'k' keystroke typed into a message.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      setOrderSearchOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const handleMessagesLoaded = useCallback((loaded: Message[]) => {
     setMessages(loaded);
   }, []);
@@ -590,6 +636,7 @@ function InboxPageInner() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            onOpenOrderSearch={() => setOrderSearchOpen(true)}
           />
         </div>
 
@@ -636,6 +683,12 @@ function InboxPageInner() {
           </div>
         )}
       </div>
+
+      <OrderSearchDialog
+        open={orderSearchOpen}
+        onOpenChange={setOrderSearchOpen}
+        onOpenConversation={handleOpenConversationById}
+      />
     </div>
   );
 }

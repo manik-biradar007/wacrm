@@ -142,7 +142,32 @@
       "clearAll": "Clear all",
       "noConversations": "No conversations found",
       "noMessagesYet": "No messages yet",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "orderSearch": "Order lookup",
+      "orderSearchShortcutHint": "Search orders ({shortcut})"
+    },
+    "orderSearch": {
+      "title": "Order lookup",
+      "description": "Search a purchase by mobile number, UTR, or payment ID, then send an instruction straight to the customer.",
+      "placeholder": "Mobile, UTR, or payment ID…",
+      "typeToSearch": "Type at least 3 characters to search.",
+      "noResults": "No matching orders found.",
+      "searchError": "Couldn't search orders.",
+      "unnamed": "Unnamed",
+      "downloaded": "Downloaded {count}×",
+      "notDownloaded": "Not downloaded yet",
+      "back": "Back",
+      "mobile": "Mobile",
+      "amount": "Amount",
+      "paymentId": "Payment ID",
+      "utr": "UTR",
+      "purchasedOn": "Purchased on",
+      "messagePlaceholder": "Type an instruction to send… (Shift+Enter for new line)",
+      "openConversation": "Open conversation",
+      "openError": "Couldn't open the conversation.",
+      "send": "Send",
+      "sendSuccess": "Message sent.",
+      "sendError": "Couldn't send the message."
     },
     "messageThread": {
       "backToConversations": "Back to conversations",

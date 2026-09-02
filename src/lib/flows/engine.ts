@@ -21,9 +21,12 @@
  *   - Type definitions — `types.ts`.
  *
  * Concurrency model:
- *   - Idempotency on `meta_message_id`: the runner refuses to advance
- *     an active run twice for the same Meta message — protects against
- *     Meta's retries.
+ *   - Idempotency on `meta_message_id`: recordInboundOnce() INSERTs a
+ *     dedup marker guarded by the partial unique index
+ *     `idx_flow_run_events_dedup` (migration 039) before an active
+ *     run is touched at all — a Meta retry (of the message that
+ *     started the run, or of a later reply) collides on that INSERT
+ *     and is dropped. Atomic, unlike a SELECT-then-act check.
  *   - Optimistic UPDATE with `current_node_key` precondition: two
  *     simultaneous taps for the same run collide at the DB layer; the
  *     second is a no-op.
@@ -322,39 +325,41 @@ async function logEvent(
 }
 
 /**
- * Idempotency check — has a `reply_received` event with this Meta
- * message_id already been recorded for any of the contact's flow
- * runs? If yes, the inbound is a duplicate (Meta retry) and we
- * exit without re-advancing.
- *
- * Implementation note: scoped to runs belonging to this user/contact
- * so the lookup is cheap (the index on flow_run_events(flow_run_id,
- * event_type) plus the small set of runs per contact).
+ * Atomically records that this Meta message has been processed for
+ * this run, and reports whether it's new. Backed by the partial
+ * unique index `idx_flow_run_events_dedup` on
+ * `(flow_run_id, payload->>'meta_message_id')` (migration 039) — an
+ * INSERT-or-conflict instead of the old SELECT-then-INSERT, so two
+ * concurrent deliveries of the same Meta retry can't both slip past
+ * the check. Covers the run's `started` event too (same payload key),
+ * so a late retry of the message that started the run is recognized
+ * as a duplicate even after the run has moved on to a later node —
+ * not just retries of in-flight replies.
  */
-async function isDuplicateInbound(
+async function recordInboundOnce(
   db: AdminClient,
-  accountId: string,
-  contactId: string,
-  metaMessageId: string,
+  runId: string,
+  currentNodeKey: string | null,
+  message: ParsedInbound,
 ): Promise<boolean> {
-  // Fetch ALL run ids for this contact in this account (active +
-  // historical). Bounded by how many flows the customer has been
-  // through — small.
-  const { data: runs } = await db
-    .from("flow_runs")
-    .select("id")
-    .eq("account_id", accountId)
-    .eq("contact_id", contactId);
-  if (!runs?.length) return false;
-  const runIds = runs.map((r) => (r as { id: string }).id);
-
-  const { count } = await db
-    .from("flow_run_events")
-    .select("id", { count: "exact", head: true })
-    .in("flow_run_id", runIds)
-    .eq("event_type", "reply_received")
-    .filter("payload->>meta_message_id", "eq", metaMessageId);
-  return (count ?? 0) > 0;
+  const { error } = await db.from("flow_run_events").insert({
+    flow_run_id: runId,
+    event_type: "reply_received",
+    node_key: currentNodeKey,
+    payload: {
+      meta_message_id: message.meta_message_id,
+      reply_kind: message.kind,
+      reply_id: message.kind === "interactive_reply" ? message.reply_id : null,
+      text_length: message.kind === "text" ? message.text.length : null,
+    },
+  });
+  if (!error) return true;
+  const msg = error.message ?? "";
+  if (msg.includes("23505") || msg.includes("duplicate key")) return false;
+  // Unexpected error — fail open (treat as new) rather than silently
+  // dropping a real customer message.
+  console.error("[flows] recordInboundOnce error:", error.message);
+  return true;
 }
 
 async function findEntryFlow(
@@ -964,23 +969,11 @@ export async function dispatchInboundToFlows(
       input.contactId,
     );
 
-    // Idempotency — only matters if there's already a run for this
-    // contact. For new runs, the partial unique index catches duplicate
-    // starts at INSERT time.
+    // Idempotency against Meta retries — handleReplyForActiveRun does
+    // the atomic dedup check itself (recordInboundOnce). For new runs,
+    // the partial unique index on flow_runs catches duplicate starts
+    // at INSERT time.
     if (activeRun) {
-      const dupe = await isDuplicateInbound(
-        db,
-        input.accountId,
-        input.contactId,
-        input.message.meta_message_id,
-      );
-      if (dupe) {
-        return {
-          consumed: true,
-          flow_run_id: activeRun.id,
-          outcome: "duplicate_inbound_ignored",
-        };
-      }
       // One SELECT for the whole flow's nodes — advance loop is now
       // in-memory. See loadAllNodes.
       const nodes = await loadAllNodes(db, activeRun.flow_id);
@@ -1021,12 +1014,23 @@ async function handleReplyForActiveRun(
   // table. Length is enough for "did they actually reply?" debugging;
   // for the captured value itself, the `node_entered` event already
   // records `captured_key` + `captured_length` after the var is stored.
-  await logEvent(db, run.id, "reply_received", run.current_node_key, {
-    meta_message_id: message.meta_message_id,
-    reply_kind: message.kind,
-    reply_id: message.kind === "interactive_reply" ? message.reply_id : null,
-    text_length: message.kind === "text" ? message.text.length : null,
-  });
+  //
+  // This insert doubles as the Meta-retry dedup check (see
+  // recordInboundOnce) — a duplicate delivery of this same message
+  // bails out here before touching the run at all.
+  const isNewInbound = await recordInboundOnce(
+    db,
+    run.id,
+    run.current_node_key,
+    message,
+  );
+  if (!isNewInbound) {
+    return {
+      consumed: true,
+      flow_run_id: run.id,
+      outcome: "duplicate_inbound_ignored",
+    };
+  }
 
   if (!run.current_node_key) {
     // Defensive — a run with status='active' but no current node is
