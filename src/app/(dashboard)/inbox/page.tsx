@@ -623,10 +623,17 @@ function InboxPageInner() {
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
-            thread can occupy the full width. Always visible on lg+. */}
+            thread can occupy the full width. Always visible on lg+.
+
+            `min-w-0` is load-bearing on mobile, same as the thread
+            panel below (#165): without it this flex child won't
+            shrink below the filter row's natural content width (search
+            box + filter dropdowns + order-search button), so on a
+            narrow phone the row overflows past the screen edge and
+            the parent's `overflow-hidden` clips it with no scrollbar. */}
         <div
           className={cn(
-            "flex h-full flex-1 lg:flex-none",
+            "flex h-full min-w-0 flex-1 lg:flex-none",
             hasActiveConv ? "hidden lg:flex" : "flex",
           )}
         >

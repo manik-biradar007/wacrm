@@ -33,11 +33,6 @@ export async function lookupOrderByMobile(
   const key = normalizeMobile(mobile);
   if (key.length < 10) return { status: "not_found" };
 
-  if (!process.env.ORDERS_PG_HOST) {
-    console.error("[order-lookup] ORDERS_PG_HOST not configured");
-    return { status: "not_found" };
-  }
-
   try {
     const { rows } = await withOrdersClient((client) =>
       client.query<{ transaction_id: string; created_on: string }>(
