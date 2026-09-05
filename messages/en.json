@@ -170,6 +170,7 @@
       "sendError": "Couldn't send the message."
     },
     "messageThread": {
+      "orderLookup": "Order lookup",
       "backToConversations": "Back to conversations",
       "hideContactPanel": "Hide contact panel",
       "showContactPanel": "Show contact panel",

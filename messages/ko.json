@@ -170,6 +170,7 @@
       "sendError": "메시지를 보낼 수 없습니다."
     },
     "messageThread": {
+      "orderLookup": "주문 조회",
       "backToConversations": "대화 목록으로 돌아가기",
       "hideContactPanel": "연락처 패널 숨기기",
       "showContactPanel": "연락처 패널 표시",

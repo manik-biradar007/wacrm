@@ -28,6 +28,7 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  Receipt,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useTranslations } from "next-intl";
@@ -113,6 +114,9 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  /** Opens the order-search dialog scoped to this conversation (mobile /
+   *  UTR / payment-id lookup) — rendered as a header button. */
+  onOpenOrderSearch?: () => void;
 }
 
 function formatDateSeparator(dateStr: string, t: ReturnType<typeof useTranslations>): string {
@@ -171,6 +175,7 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onOpenOrderSearch,
 }: MessageThreadProps) {
   const t = useTranslations("Inbox.messageThread");
   const tTimer = useTranslations("Inbox.sessionTimer");
@@ -1041,6 +1046,22 @@ export function MessageThread({
               ) : (
                 <PanelRightOpen className="h-4 w-4" />
               )}
+            </button>
+          )}
+
+          {/* Order lookup — mobile / UTR / payment-id search, scoped to
+              this conversation so "Send" always targets this thread
+              rather than resolving a (possibly different) contact by
+              phone number. Lives here instead of the conversation list
+              so it's available while actually looking at the chat. */}
+          {onOpenOrderSearch && (
+            <button
+              type="button"
+              onClick={onOpenOrderSearch}
+              title={t("orderLookup")}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Receipt className="h-3.5 w-3.5" />
             </button>
           )}
 

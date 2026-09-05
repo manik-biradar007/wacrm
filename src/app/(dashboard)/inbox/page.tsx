@@ -643,7 +643,6 @@ function InboxPageInner() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
-            onOpenOrderSearch={() => setOrderSearchOpen(true)}
           />
         </div>
 
@@ -677,6 +676,7 @@ function InboxPageInner() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            onOpenOrderSearch={() => setOrderSearchOpen(true)}
           />
         </div>
 
@@ -695,6 +695,7 @@ function InboxPageInner() {
         open={orderSearchOpen}
         onOpenChange={setOrderSearchOpen}
         onOpenConversation={handleOpenConversationById}
+        activeConversationId={activeConversation?.id ?? null}
       />
     </div>
   );

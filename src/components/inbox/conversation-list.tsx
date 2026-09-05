@@ -9,7 +9,7 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X, Receipt } from "lucide-react";
+import { Search, ChevronDown, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
@@ -34,8 +34,6 @@ interface ConversationListProps {
    * or the tab was throttled. Optional so existing callers keep working.
    */
   resyncToken?: number;
-  /** Opens the order-search dialog (mobile / UTR / payment-id lookup). */
-  onOpenOrderSearch: () => void;
 }
 
 const STATUS_COLORS: Record<ConversationStatus, string> = {
@@ -54,7 +52,6 @@ export function ConversationList({
   conversations,
   onConversationsLoaded,
   resyncToken = 0,
-  onOpenOrderSearch,
 }: ConversationListProps) {
   const t = useTranslations("Inbox.conversationList");
   
@@ -353,16 +350,6 @@ export function ConversationList({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-
-          <button
-            type="button"
-            onClick={onOpenOrderSearch}
-            title={t("orderSearchShortcutHint", { shortcut: "Ctrl/⌘ K" })}
-            className="ml-auto inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Receipt className="h-3.5 w-3.5" />
-            {t("orderSearch")}
-          </button>
         </div>
 
         {hasContactFilters && (

@@ -39,13 +39,27 @@ interface OrderSearchDialogProps {
    *  the agent clicks "Open conversation" — so the caller can select
    *  the thread the way a normal conversation click would. */
   onOpenConversation: (conversationId: string) => void;
+  /**
+   * The conversation currently open behind this dialog, if any. When
+   * set, "Send" delivers straight into this thread instead of resolving
+   * a conversation from the order's mobile number — that lookup can
+   * land on a different contact/conversation than the one the agent is
+   * actually looking at, which would otherwise send the message to the
+   * wrong thread.
+   */
+  activeConversationId?: string | null;
 }
 
 // Debounce a search-as-you-type input against the external orders DB
 // without hammering it on every keystroke.
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function OrderSearchDialog({ open, onOpenChange, onOpenConversation }: OrderSearchDialogProps) {
+export function OrderSearchDialog({
+  open,
+  onOpenChange,
+  onOpenConversation,
+  activeConversationId,
+}: OrderSearchDialogProps) {
   const t = useTranslations("Inbox.orderSearch");
 
   const [query, setQuery] = useState("");
@@ -109,6 +123,30 @@ export function OrderSearchDialog({ open, onOpenChange, onOpenConversation }: Or
     if (!selected?.mobile || !message.trim() || sending) return;
     setSending(true);
     try {
+      // Opened from an active thread: send straight into that
+      // conversation rather than re-resolving one from the order's
+      // mobile number, which could match a different contact than the
+      // one the agent is actually looking at.
+      if (activeConversationId) {
+        const res = await fetch("/api/whatsapp/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: activeConversationId,
+            message_type: "text",
+            content_text: message.trim(),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error ?? t("sendError"));
+          return;
+        }
+        toast.success(t("sendSuccess"));
+        onOpenChange(false);
+        return;
+      }
+
       const res = await fetch("/api/orders/quick-send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -131,7 +169,7 @@ export function OrderSearchDialog({ open, onOpenChange, onOpenConversation }: Or
     } finally {
       setSending(false);
     }
-  }, [selected, message, sending, onOpenConversation, onOpenChange, t]);
+  }, [selected, message, sending, activeConversationId, onOpenConversation, onOpenChange, t]);
 
   const handleOpenConversation = useCallback(async () => {
     if (!selected?.mobile || opening) return;
@@ -284,21 +322,23 @@ export function OrderSearchDialog({ open, onOpenChange, onOpenConversation }: Or
               className="w-full resize-none rounded-xl border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50"
             />
 
-            <div className="flex items-center justify-between gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={opening}
-                className="gap-1.5 text-xs text-muted-foreground"
-                onClick={handleOpenConversation}
-              >
-                {opening ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ExternalLink className="h-3.5 w-3.5" />
-                )}
-                {t("openConversation")}
-              </Button>
+            <div className="flex items-center justify-end gap-2">
+              {!activeConversationId && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={opening}
+                  className="mr-auto gap-1.5 text-xs text-muted-foreground"
+                  onClick={handleOpenConversation}
+                >
+                  {opening ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  )}
+                  {t("openConversation")}
+                </Button>
+              )}
               <Button
                 size="sm"
                 disabled={!message.trim() || sending}
