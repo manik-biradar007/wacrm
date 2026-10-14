@@ -164,6 +164,7 @@
       "purchasedOn": "구매일",
       "messagePlaceholder": "보낼 안내 메시지를 입력하세요… (Shift+Enter로 줄바꿈)",
       "useFoundTemplate": "\"주문 확인됨\" 템플릿 사용",
+      "watchVideoGuide": "비디오 가이드 보기",
       "attachImage": "이미지 첨부",
       "removeAttachment": "첨부 파일 제거",
       "imageTooLarge": "이미지가 너무 큽니다 — 최대 {max}MB.",

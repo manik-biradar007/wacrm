@@ -164,6 +164,7 @@
       "purchasedOn": "Purchased on",
       "messagePlaceholder": "Type an instruction to send… (Shift+Enter for new line)",
       "useFoundTemplate": "Use \"order found\" template",
+      "watchVideoGuide": "Watch video guide",
       "attachImage": "Attach image",
       "removeAttachment": "Remove attachment",
       "imageTooLarge": "Image is too large — max {max} MB.",

@@ -71,6 +71,7 @@ export async function lookupOrderByMobile(
  * migration — it's the only node using it today.
  */
 export const ORDER_LOOKUP_NODE_TYPE = "http_fetch";
+export const ORDER_FOUND_VIDEO_URL = "https://youtu.be/UhKTD_0DcNM";
 
 export interface OrderLookupNodeConfig {
   /** run.vars key holding the mobile number to look up. */
@@ -79,3 +80,4 @@ export interface OrderLookupNodeConfig {
   expired_next: string;
   not_found_next: string;
 }
+

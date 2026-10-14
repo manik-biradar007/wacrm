@@ -577,7 +577,7 @@ describe("reachableFromEntry", () => {
           media_type: "image",
           filename: "support-page-guide.jpg",
           media_url: "https://example.com/guide.jpg",
-          caption: "✅ We found your order! Payment ID: {{vars.lookup_payment_id}}",
+          caption: "✅ We found your order! Payment ID: {{vars.lookup_payment_id}}\n\n📺 Watch Video Guide:\nhttps://youtu.be/UhKTD_0DcNM",
           next_node_key: "end",
         },
       },

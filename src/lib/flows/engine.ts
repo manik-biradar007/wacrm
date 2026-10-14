@@ -49,6 +49,7 @@ import { removeContactTag } from "@/lib/contacts/tag-write";
 import {
   lookupOrderByMobile,
   ORDER_LOOKUP_NODE_TYPE,
+  ORDER_FOUND_VIDEO_URL,
   type OrderLookupNodeConfig,
 } from "./order-lookup";
 import { classifyIntent, type IntentCandidate } from "./intent-classifier";
@@ -845,6 +846,8 @@ async function advanceFromNodeKey(
           lookup_status: result.status,
           lookup_payment_id:
             "paymentId" in result ? result.paymentId : undefined,
+          lookup_video_url:
+            "paymentId" in result ? ORDER_FOUND_VIDEO_URL : undefined,
           ...(typeof mobile === "string" && mobile.trim() ? { [cfg.mobile_var]: mobile } : {}),
         };
         await db

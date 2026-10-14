@@ -32,16 +32,18 @@ import {
 } from "@/lib/storage/upload-media";
 import { CHAT_MEDIA_BUCKET } from "./message-composer";
 
+/** Same support-page screenshot the "Biodata Support Bot" flow attaches
+ *  on its own order-found step, so agents send the identical template. */
+export const ORDER_FOUND_TEMPLATE_IMAGE_URL =
+  "https://iywfneckeyuluzucnaut.supabase.co/storage/v1/object/public/flow-media/account-4167268b-0207-4912-87ac-23c9cf476371/1785951591780-support-page-guide.jpg";
+
+export const ORDER_FOUND_VIDEO_URL = "https://youtu.be/UhKTD_0DcNM";
+
 /** Canned reply for a resolved order — fills in the payment ID so the
  *  agent doesn't have to retype the re-download instructions by hand. */
 function buildOrderFoundMessage(paymentId: string): string {
-  return `✅ We found your order!\n\nYour Payment ID:\n${paymentId}\n\nGo back to the website where you purchased your biodata and open the Download/Support section there. Paste this Payment ID exactly as shown above (including "pay_") to re-download your biodata.`;
+  return `✅ We found your order!\n\nYour Payment ID:\n${paymentId}\n\nGo back to the website where you purchased your biodata and open the Download/Support section there. Paste this Payment ID exactly as shown above (including "pay_") to re-download your biodata.\n\n📺 Watch Video Guide:\n${ORDER_FOUND_VIDEO_URL}`;
 }
-
-/** Same support-page screenshot the "Biodata Support Bot" flow attaches
- *  on its own order-found step, so agents send the identical template. */
-const ORDER_FOUND_TEMPLATE_IMAGE_URL =
-  "https://iywfneckeyuluzucnaut.supabase.co/storage/v1/object/public/flow-media/account-4167268b-0207-4912-87ac-23c9cf476371/1785951591780-support-page-guide.jpg";
 
 interface OrderSearchResult {
   id: number;
@@ -422,14 +424,25 @@ export function OrderSearchDialog({
               </dl>
             </div>
 
-            <button
-              type="button"
-              onClick={applyFoundTemplate}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              {t("useFoundTemplate")}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={applyFoundTemplate}
+                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {t("useFoundTemplate")}
+              </button>
+              <a
+                href={ORDER_FOUND_VIDEO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                {t("watchVideoGuide")}
+              </a>
+            </div>
 
             <textarea
               value={message}
