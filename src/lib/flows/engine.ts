@@ -824,7 +824,18 @@ async function advanceFromNodeKey(
     }
     if (node.node_type === ORDER_LOOKUP_NODE_TYPE) {
       const cfg = node.config as unknown as OrderLookupNodeConfig;
-      const mobile = run.vars[cfg.mobile_var];
+      let mobile = run.vars[cfg.mobile_var];
+      if ((!mobile || typeof mobile !== "string" || !mobile.trim()) && run.contact_id) {
+        // Fallback: resolve contact's WhatsApp phone number directly
+        const { data: contact } = await db
+          .from("contacts")
+          .select("phone")
+          .eq("id", run.contact_id)
+          .maybeSingle();
+        if (contact?.phone) {
+          mobile = contact.phone;
+        }
+      }
       try {
         const result =
           typeof mobile === "string" && mobile.trim().length > 0
@@ -835,6 +846,7 @@ async function advanceFromNodeKey(
           lookup_status: result.status,
           lookup_payment_id:
             "paymentId" in result ? result.paymentId : undefined,
+          ...(typeof mobile === "string" && mobile.trim() ? { [cfg.mobile_var]: mobile } : {}),
         };
         await db
           .from("flow_runs")
@@ -1287,6 +1299,23 @@ async function startNewRun(
   input: DispatchInboundInput,
   nodes: Map<string, FlowNodeRow>,
 ): Promise<DispatchInboundResult> {
+  // Pre-seed run.vars with contact details (including phone for automated order lookups)
+  const initialVars: Record<string, unknown> = {};
+  if (input.contactId) {
+    const { data: contact } = await db
+      .from("contacts")
+      .select("phone, name")
+      .eq("id", input.contactId)
+      .maybeSingle();
+    if (contact?.phone) {
+      initialVars.contact_phone = contact.phone;
+      initialVars.mobile = contact.phone;
+    }
+    if (contact?.name) {
+      initialVars.contact_name = contact.name;
+    }
+  }
+
   // INSERT — partial unique index `idx_one_active_run_per_contact`
   // catches concurrent inserts with 23505. We catch and return as
   // consumed:true (the parallel webhook handles it).
@@ -1306,6 +1335,7 @@ async function startNewRun(
       conversation_id: input.conversationId,
       status: "active",
       current_node_key: flow.entry_node_id,
+      vars: initialVars,
     })
     .select("*")
     .maybeSingle();

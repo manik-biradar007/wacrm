@@ -546,4 +546,93 @@ describe("reachableFromEntry", () => {
     const set = reachableFromEntry("a", nodes);
     expect(set).toEqual(new Set(["a", "b"]));
   });
+
+  it("validates the cost-optimized order lookup flow cleanly", () => {
+    const optimizedFlow = {
+      name: "Biodata Support Bot (Cost-Optimized)",
+      trigger_type: "first_inbound_message" as const,
+      trigger_config: {},
+      entry_node_id: "start",
+    };
+    const optimizedNodes = [
+      {
+        node_key: "start",
+        node_type: "start",
+        config: { next_node_key: "lookup_by_wa_phone" },
+      },
+      {
+        node_key: "lookup_by_wa_phone",
+        node_type: "http_fetch",
+        config: {
+          mobile_var: "contact_phone",
+          active_next: "mobile_found",
+          expired_next: "order_expired_msg",
+          not_found_next: "ask_mobile",
+        },
+      },
+      {
+        node_key: "mobile_found",
+        node_type: "send_media",
+        config: {
+          media_type: "image",
+          filename: "support-page-guide.jpg",
+          media_url: "https://example.com/guide.jpg",
+          caption: "✅ We found your order! Payment ID: {{vars.lookup_payment_id}}",
+          next_node_key: "end",
+        },
+      },
+      {
+        node_key: "ask_mobile",
+        node_type: "collect_input",
+        config: {
+          var_key: "manual_mobile",
+          validation: "phone",
+          prompt_text: "Please enter your mobile number:",
+          next_node_key: "lookup_by_manual_mobile",
+        },
+      },
+      {
+        node_key: "lookup_by_manual_mobile",
+        node_type: "http_fetch",
+        config: {
+          mobile_var: "manual_mobile",
+          active_next: "mobile_found",
+          expired_next: "order_expired_msg",
+          not_found_next: "order_not_found_msg",
+        },
+      },
+      {
+        node_key: "order_not_found_msg",
+        node_type: "send_message",
+        config: {
+          text: "Sorry, order not found.",
+          next_node_key: "order_not_found_handoff",
+        },
+      },
+      {
+        node_key: "order_not_found_handoff",
+        node_type: "handoff",
+        config: {
+          note: "No order found for {{vars.manual_mobile}}",
+        },
+      },
+      {
+        node_key: "order_expired_msg",
+        node_type: "send_message",
+        config: {
+          text: "Order is expired.",
+          next_node_key: "end",
+        },
+      },
+      {
+        node_key: "end",
+        node_type: "end",
+        config: {},
+      },
+    ];
+
+    const issues = validateFlowForActivation(optimizedFlow, optimizedNodes);
+    expect(issues).toEqual([]);
+  });
 });
+
