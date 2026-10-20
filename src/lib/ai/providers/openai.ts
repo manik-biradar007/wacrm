@@ -1,5 +1,5 @@
 import { AiError, type ProviderResult } from '../types'
-import { MAX_OUTPUT_TOKENS } from '../defaults'
+import { MAX_OPENAI_COMPLETION_TOKENS } from '../defaults'
 import {
   mergeConsecutive,
   normalizeUsage,
@@ -11,7 +11,10 @@ import {
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 interface OpenAiResponse {
-  choices?: { message?: { content?: string } }[]
+  choices?: {
+    finish_reason?: string | null
+    message?: { content?: string }
+  }[]
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -41,7 +44,7 @@ export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult
           { role: 'system', content: systemPrompt },
           ...mergeConsecutive(messages),
         ],
-        max_completion_tokens: MAX_OUTPUT_TOKENS,
+        max_completion_tokens: MAX_OPENAI_COMPLETION_TOKENS,
       }),
       signal: AbortSignal.timeout(timeoutMs),
     })
@@ -54,8 +57,15 @@ export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult
   }
 
   const data = (await res.json().catch(() => null)) as OpenAiResponse | null
-  const text = data?.choices?.[0]?.message?.content
+  const choice = data?.choices?.[0]
+  const text = choice?.message?.content
   if (!text || typeof text !== 'string' || !text.trim()) {
+    if (choice?.finish_reason === 'length') {
+      throw new AiError(
+        'OpenAI ran out of completion tokens before producing reply text. Try a shorter conversation or a model with lower reasoning requirements.',
+        { code: 'incomplete_response' },
+      )
+    }
     throw new AiError('OpenAI returned an empty response.', {
       code: 'empty_response',
     })

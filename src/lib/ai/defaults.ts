@@ -26,6 +26,10 @@ export const HANDOFF_SENTINEL = '[[HANDOFF]]'
  *  bounds token spend on the caller's own key. */
 export const MAX_OUTPUT_TOKENS = 1024
 
+// OpenAI counts reasoning tokens against max_completion_tokens, unlike
+// the user-visible reply limit used by Anthropic's max_tokens.
+export const MAX_OPENAI_COMPLETION_TOKENS = 4096
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 20
 

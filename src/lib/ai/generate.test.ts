@@ -93,6 +93,7 @@ describe('generateReply — OpenAI', () => {
     })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.openai.com')
+    expect(JSON.parse(opts.body).max_completion_tokens).toBe(4096)
     expect(opts.headers.Authorization).toBe('Bearer sk-test')
   })
 
@@ -125,6 +126,27 @@ describe('generateReply — OpenAI', () => {
         messages: [{ role: 'user', content: 'Hi' }],
       }),
     ).rejects.toBeInstanceOf(AiError)
+  })
+
+  it('explains when reasoning uses the completion token limit', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          choices: [{ message: { content: '' }, finish_reason: 'length' }],
+        }),
+      ),
+    )
+    await expect(
+      generateReply({
+        config: config(),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({
+      code: 'incomplete_response',
+      message: expect.stringContaining('completion tokens'),
+    })
   })
 })
 
