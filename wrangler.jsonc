@@ -8,6 +8,10 @@
 	"main": "vinext/server/fetch-handler",
 	"routes": [
 		{
+			"pattern": "support.lagnapatrikadesign.in",
+			"custom_domain": true
+		},
+		{
 			"pattern": "support.marriagebiodata.site",
 			"custom_domain": true
 		}
