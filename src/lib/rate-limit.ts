@@ -171,6 +171,10 @@ export const RATE_LIMITS = {
    *  comfortably covers live-typing against the external orders DB
    *  while bounding a runaway client-side loop. */
   orderSearch: { limit: 60, windowMs: 60_000 },
+  /** Order biodata fetch + Word conversion (inbox order-lookup preview).
+   *  Each call hits the biodata backend, and the Word one also runs the
+   *  external docx converter, so this stays well below the search budget. */
+  orderBiodata: { limit: 30, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

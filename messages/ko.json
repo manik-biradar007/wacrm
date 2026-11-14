@@ -173,7 +173,25 @@
       "openError": "대화를 열 수 없습니다.",
       "send": "보내기",
       "sendSuccess": "메시지를 보냈습니다.",
-      "sendError": "메시지를 보낼 수 없습니다."
+      "sendError": "메시지를 보낼 수 없습니다.",
+      "fileTooLarge": "파일이 너무 큽니다 — 최대 {max}MB.",
+      "preview": {
+        "title": "바이오데이터 미리보기",
+        "loading": "바이오데이터를 불러오는 중…",
+        "missing": "이 결제에 저장된 바이오데이터가 없습니다.",
+        "error": "바이오데이터를 불러올 수 없습니다.",
+        "pageLabel": "{page}페이지",
+        "formats": {
+          "image": "이미지 (JPG)",
+          "pdf": "PDF",
+          "word": "Word (DOCX)"
+        },
+        "download": "다운로드",
+        "attach": "첨부",
+        "imageNeedsPdf": "여러 페이지 바이오데이터는 이미지 한 장으로 보낼 수 없습니다 — PDF를 사용하세요.",
+        "generateError": "{format} 파일을 만들 수 없습니다.",
+        "imageTooLarge": "이미지가 너무 큽니다 — 최대 {max}MB."
+      }
     },
     "messageThread": {
       "orderLookup": "주문 조회",

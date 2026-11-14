@@ -10,6 +10,7 @@ import {
   ExternalLink,
   IndianRupee,
   Image as ImageIcon,
+  FileText,
   Sparkles,
   X,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { CHAT_MEDIA_BUCKET } from "./message-composer";
+import { OrderBiodataPreview, type StagedKind } from "./order-biodata-preview";
 
 /** Same support-page screenshot the "Biodata Support Bot" flow attaches
  *  on its own order-found step, so agents send the identical template. */
@@ -43,6 +45,15 @@ export const ORDER_FOUND_VIDEO_URL = "https://youtu.be/UhKTD_0DcNM";
  *  agent doesn't have to retype the re-download instructions by hand. */
 function buildOrderFoundMessage(paymentId: string): string {
   return `✅ We found your order!\n\nYour Payment ID:\n${paymentId}\n\nGo back to the website where you purchased your biodata and open the Download/Support section there. Paste this Payment ID exactly as shown above (including "pay_") to re-download your biodata.\n\n📺 Watch Video Guide:\n${ORDER_FOUND_VIDEO_URL}`;
+}
+
+/** A file staged on the composer, waiting to be sent with the message. */
+interface StagedAttachment {
+  kind: StagedKind;
+  url: string;
+  /** Storage object path; null for the fixed order-found template image (never GC'd). */
+  path: string | null;
+  filename: string;
 }
 
 interface OrderSearchResult {
@@ -98,30 +109,30 @@ export function OrderSearchDialog({
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [opening, setOpening] = useState(false);
-  // `path` is null for the fixed order-found template image (nothing to
-  // GC — it lives permanently in the flow-media bucket, not staged by us).
-  const [attachedImage, setAttachedImage] = useState<{ url: string; path: string | null } | null>(null);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  // Staged file to send alongside the message (image or PDF/Word). Its
+  // storage object is GC'd when replaced, removed, or the dialog closes.
+  const [attachment, setAttachment] = useState<StagedAttachment | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestIdRef = useRef(0);
 
-  // Mirror of `attachedImage` for the close/unmount cleanup below, which
+  // Mirror of `attachment` for the close/unmount cleanup below, which
   // can't read render state.
-  const attachedImageRef = useRef<{ url: string; path: string | null } | null>(null);
+  const attachmentRef = useRef<StagedAttachment | null>(null);
   useEffect(() => {
-    attachedImageRef.current = attachedImage;
-  }, [attachedImage]);
+    attachmentRef.current = attachment;
+  }, [attachment]);
 
   // Reset to a clean slate every time the dialog opens, and autofocus
   // the search box so the shortcut goes straight to typing. On close,
-  // GC any staged-but-unsent image so it doesn't orphan in the bucket.
+  // GC any staged-but-unsent file so it doesn't orphan in the bucket.
   useEffect(() => {
     if (!open) {
-      const staged = attachedImageRef.current;
+      const staged = attachmentRef.current;
       if (staged?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, staged.path).catch(() => {});
-      setAttachedImage(null);
+      setAttachment(null);
       return;
     }
     setQuery("");
@@ -129,13 +140,13 @@ export function OrderSearchDialog({
     setSearched(false);
     setSelected(null);
     setMessage("");
-    setAttachedImage(null);
+    setAttachment(null);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
   useEffect(() => {
     return () => {
-      const staged = attachedImageRef.current;
+      const staged = attachmentRef.current;
       if (staged?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, staged.path).catch(() => {});
     };
   }, []);
@@ -192,74 +203,95 @@ export function OrderSearchDialog({
     return data.conversation_id as string;
   }, [activeConversationId, selected, t]);
 
-  const handleImageChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      if (!file) return;
-      const max = MEDIA_MAX_BYTES_BY_KIND.image;
+  /** Uploads a file to the chat-media bucket and stages it on the composer. */
+  const stageFile = useCallback(
+    async (file: File, kind: StagedKind) => {
+      const max = MEDIA_MAX_BYTES_BY_KIND[kind];
       if (file.size > max) {
-        toast.error(t("imageTooLarge", { max: Math.round(max / 1024 / 1024) }));
+        toast.error(
+          kind === "image"
+            ? t("imageTooLarge", { max: Math.round(max / 1024 / 1024) })
+            : t("fileTooLarge", { max: Math.round(max / 1024 / 1024) }),
+        );
         return;
       }
-      setUploadingImage(true);
+      setUploadingAttachment(true);
       try {
         const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
-        // Replacing a previously staged image — GC the one being dropped.
-        if (attachedImageRef.current?.path) {
-          void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachedImageRef.current.path).catch(() => {});
+        // Replacing a previously staged file — GC the one being dropped.
+        if (attachmentRef.current?.path) {
+          void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachmentRef.current.path).catch(() => {});
         }
-        setAttachedImage({ url: publicUrl, path });
+        setAttachment({ kind, url: publicUrl, path, filename: file.name });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("imageUploadError"));
       } finally {
-        setUploadingImage(false);
+        setUploadingAttachment(false);
       }
     },
     [t],
   );
 
-  const removeAttachedImage = useCallback(() => {
-    if (attachedImage?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachedImage.path).catch(() => {});
-    setAttachedImage(null);
-  }, [attachedImage]);
+  const handleImageChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      await stageFile(file, "image");
+    },
+    [stageFile],
+  );
+
+  const removeAttachment = useCallback(() => {
+    if (attachment?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachment.path).catch(() => {});
+    setAttachment(null);
+  }, [attachment]);
 
   const applyFoundTemplate = useCallback(() => {
     if (!selected) return;
     const paymentId = selected.transactionId || selected.utr || "";
     setMessage(buildOrderFoundMessage(paymentId));
-    // Replacing a previously staged (user-uploaded) image — GC it.
-    if (attachedImageRef.current?.path) {
-      void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachedImageRef.current.path).catch(() => {});
+    // Replacing a previously staged (user-uploaded) file — GC it.
+    if (attachmentRef.current?.path) {
+      void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachmentRef.current.path).catch(() => {});
     }
-    setAttachedImage({ url: ORDER_FOUND_TEMPLATE_IMAGE_URL, path: null });
+    setAttachment({
+      kind: "image",
+      url: ORDER_FOUND_TEMPLATE_IMAGE_URL,
+      path: null,
+      filename: "support-page-guide.jpg",
+    });
   }, [selected]);
 
   const handleSend = useCallback(async () => {
     const trimmed = message.trim();
-    if (!selected?.mobile || (!trimmed && !attachedImage) || sending) return;
+    if (!selected?.mobile || (!trimmed && !attachment) || sending) return;
     setSending(true);
     try {
       const conversationId = await resolveTargetConversationId();
       if (!conversationId) return;
 
+      const body = !attachment
+        ? { conversation_id: conversationId, message_type: "text", content_text: trimmed }
+        : attachment.kind === "image"
+          ? {
+              conversation_id: conversationId,
+              message_type: "image",
+              media_url: attachment.url,
+              content_text: trimmed || undefined,
+            }
+          : {
+              conversation_id: conversationId,
+              message_type: "document",
+              media_url: attachment.url,
+              filename: attachment.filename,
+              content_text: trimmed || undefined,
+            };
+
       const res = await fetch("/api/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          attachedImage
-            ? {
-                conversation_id: conversationId,
-                message_type: "image",
-                media_url: attachedImage.url,
-                content_text: trimmed || undefined,
-              }
-            : {
-                conversation_id: conversationId,
-                message_type: "text",
-                content_text: trimmed,
-              },
-        ),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -267,7 +299,9 @@ export function OrderSearchDialog({
         return;
       }
       toast.success(t("sendSuccess"));
-      setAttachedImage(null);
+      // The staged storage object is referenced by the sent message now —
+      // forget it so closing the dialog doesn't delete the sent file.
+      setAttachment(null);
       if (!activeConversationId) onOpenConversation(conversationId);
       onOpenChange(false);
     } catch {
@@ -278,7 +312,7 @@ export function OrderSearchDialog({
   }, [
     selected,
     message,
-    attachedImage,
+    attachment,
     sending,
     activeConversationId,
     resolveTargetConversationId,
@@ -312,7 +346,7 @@ export function OrderSearchDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
@@ -394,7 +428,7 @@ export function OrderSearchDialog({
             </div>
           </ScrollArea>
         ) : (
-          <div className="space-y-3">
+          <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
             <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-foreground">
@@ -423,6 +457,18 @@ export function OrderSearchDialog({
                 </dd>
               </dl>
             </div>
+
+            {selected.transactionId ? (
+              <OrderBiodataPreview
+                key={selected.transactionId}
+                paymentId={selected.transactionId}
+                onAttach={(file, kind) => void stageFile(file, kind)}
+              />
+            ) : (
+              <p className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+                {t("preview.missing")}
+              </p>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -466,31 +512,46 @@ export function OrderSearchDialog({
               onChange={handleImageChange}
             />
 
-            {attachedImage ? (
-              <div className="relative inline-block">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={attachedImage.url}
-                  alt=""
-                  className="h-20 w-20 rounded-lg object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={removeAttachedImage}
-                  aria-label={t("removeAttachment")}
-                  className="absolute -right-1.5 -top-1.5 rounded-full bg-background/90 p-0.5 text-muted-foreground shadow hover:bg-background hover:text-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
+            {attachment ? (
+              attachment.kind === "image" ? (
+                <div className="relative inline-block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={attachment.url}
+                    alt=""
+                    className="h-20 w-20 rounded-lg object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={removeAttachment}
+                    aria-label={t("removeAttachment")}
+                    className="absolute -right-1.5 -top-1.5 rounded-full bg-background/90 p-0.5 text-muted-foreground shadow hover:bg-background hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/40 py-1.5 pl-2.5 pr-1.5 text-sm">
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate text-foreground">{attachment.filename}</span>
+                  <button
+                    type="button"
+                    onClick={removeAttachment}
+                    aria-label={t("removeAttachment")}
+                    className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )
             ) : (
               <button
                 type="button"
                 onClick={() => imageInputRef.current?.click()}
-                disabled={uploadingImage}
+                disabled={uploadingAttachment}
                 className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
               >
-                {uploadingImage ? (
+                {uploadingAttachment ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <ImageIcon className="h-3.5 w-3.5" />
@@ -518,7 +579,7 @@ export function OrderSearchDialog({
               )}
               <Button
                 size="sm"
-                disabled={(!message.trim() && !attachedImage) || sending || uploadingImage}
+                disabled={(!message.trim() && !attachment) || sending || uploadingAttachment}
                 onClick={handleSend}
                 className="gap-1.5"
               >

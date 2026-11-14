@@ -168,12 +168,30 @@
       "attachImage": "Attach image",
       "removeAttachment": "Remove attachment",
       "imageTooLarge": "Image is too large — max {max} MB.",
-      "imageUploadError": "Couldn't upload the image.",
+      "fileTooLarge": "File is too large — max {max} MB.",
+      "imageUploadError": "Couldn't upload the file.",
       "openConversation": "Open conversation",
       "openError": "Couldn't open the conversation.",
       "send": "Send",
       "sendSuccess": "Message sent.",
-      "sendError": "Couldn't send the message."
+      "sendError": "Couldn't send the message.",
+      "preview": {
+        "title": "Biodata preview",
+        "loading": "Loading biodata…",
+        "missing": "No biodata saved for this payment.",
+        "error": "Couldn't load the biodata.",
+        "pageLabel": "Page {page}",
+        "formats": {
+          "image": "Image (JPG)",
+          "pdf": "PDF",
+          "word": "Word (DOCX)"
+        },
+        "download": "Download",
+        "attach": "Attach",
+        "imageNeedsPdf": "Multi-page biodata can't be sent as a single image — use PDF.",
+        "generateError": "Couldn't generate the {format} file.",
+        "imageTooLarge": "Image is too large — max {max} MB."
+      }
     },
     "messageThread": {
       "orderLookup": "Order lookup",
