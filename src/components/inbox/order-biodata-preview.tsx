@@ -30,8 +30,8 @@ export type StagedKind = "image" | "document";
 
 interface OrderBiodataPreviewProps {
   paymentId: string;
-  /** Hands a generated file to the dialog, which uploads it and stages it for sending. */
-  onAttach: (file: File, kind: StagedKind) => void;
+  /** Hands the generated file(s) to the dialog, which uploads and stages them for sending. */
+  onAttach: (files: File[], kind: StagedKind) => void;
 }
 
 /** On-screen preview resolution (2× the 794px design width). */
@@ -128,7 +128,14 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
         const info = data.biodataInfo;
         const template = resolveTemplate(data.template);
         const mode: PageMode = info.pageMode === "2page" ? "2page" : "1page";
-        const images = await loadRenderImages(info, template.bgImage);
+        // Photos are served through this app (see /api/orders/biodata/photo) so
+        // they load without CORS; inline data URLs are used as they are.
+        const photoSrc = !info.profilePicture
+          ? undefined
+          : info.profilePicture.startsWith("data:")
+            ? info.profilePicture
+            : `/api/orders/biodata/photo?paymentId=${encodeURIComponent(paymentId)}`;
+        const images = await loadRenderImages(info, template.bgImage, photoSrc);
         if (cancelled) return;
         setState({ status: "ready", info, template, mode, images });
       } catch {
@@ -264,14 +271,13 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
       setBusy({ format, action: "attach" });
       try {
         const files = await getFiles(format);
-        const [file] = files;
-        if (!file) return;
+        if (files.length === 0) return;
         const kind: StagedKind = format === "image" ? "image" : "document";
-        if (kind === "image" && file.size > IMAGE_ATTACH_MAX_BYTES) {
+        if (kind === "image" && files.some((f) => f.size > IMAGE_ATTACH_MAX_BYTES)) {
           toast.error(t("imageTooLarge", { max: Math.round(IMAGE_ATTACH_MAX_BYTES / 1024 / 1024) }));
           return;
         }
-        onAttach(file, kind);
+        onAttach(files, kind);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("generateError", { format: t(`formats.${format}`) }));
       } finally {
@@ -330,9 +336,6 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
 
       <div className="divide-y divide-border rounded-lg border border-border">
         {formats.map((format) => {
-          // WhatsApp images can't carry a multi-page biodata; the PDF is the
-          // single-file option for 2-page layouts.
-          const attachDisabled = format === "image" && pages > 1;
           const isBusy = busy?.format === format;
           return (
             <div key={format} className="flex items-center justify-between gap-2 px-3 py-2">
@@ -356,8 +359,7 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
                   variant="ghost"
                   size="sm"
                   className="h-7 gap-1 px-2 text-xs text-primary"
-                  disabled={!!busy || attachDisabled}
-                  title={attachDisabled ? t("imageNeedsPdf") : undefined}
+                  disabled={!!busy}
                   onClick={() => handleAttach(format)}
                 >
                   {isBusy && busy?.action === "attach" ? (
@@ -372,7 +374,6 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
           );
         })}
       </div>
-      {pages > 1 && <p className="text-xs text-muted-foreground">{t("imageNeedsPdf")}</p>}
     </div>
   );
 }

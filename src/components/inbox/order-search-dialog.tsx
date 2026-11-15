@@ -41,13 +41,16 @@ export const ORDER_FOUND_TEMPLATE_IMAGE_URL =
 
 export const ORDER_FOUND_VIDEO_URL = "https://youtu.be/UhKTD_0DcNM";
 
+/** Upper bound on files staged for one message, so a stray click can't queue dozens of sends. */
+const MAX_ATTACHMENTS = 10;
+
 /** Canned reply for a resolved order — fills in the payment ID so the
  *  agent doesn't have to retype the re-download instructions by hand. */
 function buildOrderFoundMessage(paymentId: string): string {
   return `✅ We found your order!\n\nYour Payment ID:\n${paymentId}\n\nGo back to the website where you purchased your biodata and open the Download/Support section there. Paste this Payment ID exactly as shown above (including "pay_") to re-download your biodata.\n\n📺 Watch Video Guide:\n${ORDER_FOUND_VIDEO_URL}`;
 }
 
-/** A file staged on the composer, waiting to be sent with the message. */
+/** A file staged on the composer, waiting to be sent. */
 interface StagedAttachment {
   kind: StagedKind;
   url: string;
@@ -109,30 +112,35 @@ export function OrderSearchDialog({
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [opening, setOpening] = useState(false);
-  // Staged file to send alongside the message (image or PDF/Word). Its
-  // storage object is GC'd when replaced, removed, or the dialog closes.
-  const [attachment, setAttachment] = useState<StagedAttachment | null>(null);
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  // Files staged to send, in send order. Each one's storage object is GC'd
+  // when removed, or when the dialog closes without sending it.
+  const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
+  const [uploadingCount, setUploadingCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestIdRef = useRef(0);
 
-  // Mirror of `attachment` for the close/unmount cleanup below, which
+  // Mirror of `attachments` for the close/unmount cleanup below, which
   // can't read render state.
-  const attachmentRef = useRef<StagedAttachment | null>(null);
+  const attachmentsRef = useRef<StagedAttachment[]>([]);
   useEffect(() => {
-    attachmentRef.current = attachment;
-  }, [attachment]);
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  const discardStaged = useCallback((list: StagedAttachment[]) => {
+    for (const a of list) {
+      if (a.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, a.path).catch(() => {});
+    }
+  }, []);
 
   // Reset to a clean slate every time the dialog opens, and autofocus
   // the search box so the shortcut goes straight to typing. On close,
-  // GC any staged-but-unsent file so it doesn't orphan in the bucket.
+  // GC any staged-but-unsent files so they don't orphan in the bucket.
   useEffect(() => {
     if (!open) {
-      const staged = attachmentRef.current;
-      if (staged?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, staged.path).catch(() => {});
-      setAttachment(null);
+      discardStaged(attachmentsRef.current);
+      setAttachments([]);
       return;
     }
     setQuery("");
@@ -140,16 +148,15 @@ export function OrderSearchDialog({
     setSearched(false);
     setSelected(null);
     setMessage("");
-    setAttachment(null);
+    setAttachments([]);
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [open]);
+  }, [open, discardStaged]);
 
   useEffect(() => {
     return () => {
-      const staged = attachmentRef.current;
-      if (staged?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, staged.path).catch(() => {});
+      discardStaged(attachmentsRef.current);
     };
-  }, []);
+  }, [discardStaged]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -203,9 +210,13 @@ export function OrderSearchDialog({
     return data.conversation_id as string;
   }, [activeConversationId, selected, t]);
 
-  /** Uploads a file to the chat-media bucket and stages it on the composer. */
+  /** Uploads a file to the chat-media bucket and appends it to the staged list. */
   const stageFile = useCallback(
     async (file: File, kind: StagedKind) => {
+      if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+        toast.error(t("tooManyAttachments", { max: MAX_ATTACHMENTS }));
+        return;
+      }
       const max = MEDIA_MAX_BYTES_BY_KIND[kind];
       if (file.size > max) {
         toast.error(
@@ -215,18 +226,18 @@ export function OrderSearchDialog({
         );
         return;
       }
-      setUploadingAttachment(true);
+      setUploadingCount((n) => n + 1);
       try {
         const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
-        // Replacing a previously staged file — GC the one being dropped.
-        if (attachmentRef.current?.path) {
-          void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachmentRef.current.path).catch(() => {});
-        }
-        setAttachment({ kind, url: publicUrl, path, filename: file.name });
+        setAttachments((prev) =>
+          prev.length >= MAX_ATTACHMENTS
+            ? prev
+            : [...prev, { kind, url: publicUrl, path, filename: file.name }],
+        );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("imageUploadError"));
       } finally {
-        setUploadingAttachment(false);
+        setUploadingCount((n) => n - 1);
       }
     },
     [t],
@@ -234,85 +245,108 @@ export function OrderSearchDialog({
 
   const handleImageChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
+      const files = Array.from(e.target.files ?? []);
       e.target.value = "";
-      if (!file) return;
-      await stageFile(file, "image");
+      for (const file of files) {
+        await stageFile(file, "image");
+      }
     },
     [stageFile],
   );
 
-  const removeAttachment = useCallback(() => {
-    if (attachment?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachment.path).catch(() => {});
-    setAttachment(null);
-  }, [attachment]);
+  const removeAttachment = useCallback((index: number) => {
+    setAttachments((prev) => {
+      const target = prev[index];
+      if (target?.path) void deleteAccountMedia(CHAT_MEDIA_BUCKET, target.path).catch(() => {});
+      return prev.filter((_, i) => i !== index);
+    });
+  }, []);
 
   const applyFoundTemplate = useCallback(() => {
     if (!selected) return;
     const paymentId = selected.transactionId || selected.utr || "";
     setMessage(buildOrderFoundMessage(paymentId));
-    // Replacing a previously staged (user-uploaded) file — GC it.
-    if (attachmentRef.current?.path) {
-      void deleteAccountMedia(CHAT_MEDIA_BUCKET, attachmentRef.current.path).catch(() => {});
-    }
-    setAttachment({
-      kind: "image",
-      url: ORDER_FOUND_TEMPLATE_IMAGE_URL,
-      path: null,
-      filename: "support-page-guide.jpg",
+    // The template image is fixed (path null, never GC'd); don't stage it twice.
+    setAttachments((prev) => {
+      if (prev.some((a) => a.url === ORDER_FOUND_TEMPLATE_IMAGE_URL)) return prev;
+      if (prev.length >= MAX_ATTACHMENTS) return prev;
+      return [
+        ...prev,
+        {
+          kind: "image",
+          url: ORDER_FOUND_TEMPLATE_IMAGE_URL,
+          path: null,
+          filename: "support-page-guide.jpg",
+        },
+      ];
     });
   }, [selected]);
 
+  /**
+   * Sends the staged files one message each, in order. The message text goes
+   * out as the caption of the first file; with no files it's a plain text
+   * message. Sent files leave the list as they go, so a failure part-way
+   * leaves only the unsent ones for a retry.
+   */
   const handleSend = useCallback(async () => {
     const trimmed = message.trim();
-    if (!selected?.mobile || (!trimmed && !attachment) || sending) return;
+    if (!selected?.mobile || (!trimmed && attachments.length === 0) || sending) return;
     setSending(true);
     try {
       const conversationId = await resolveTargetConversationId();
       if (!conversationId) return;
 
-      const body = !attachment
-        ? { conversation_id: conversationId, message_type: "text", content_text: trimmed }
-        : attachment.kind === "image"
-          ? {
-              conversation_id: conversationId,
-              message_type: "image",
-              media_url: attachment.url,
-              content_text: trimmed || undefined,
-            }
-          : {
-              conversation_id: conversationId,
-              message_type: "document",
-              media_url: attachment.url,
-              filename: attachment.filename,
-              content_text: trimmed || undefined,
-            };
+      const post = async (body: Record<string, unknown>) => {
+        const res = await fetch("/api/whatsapp/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? t("sendError"));
+      };
 
-      const res = await fetch("/api/whatsapp/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.error ?? t("sendError"));
-        return;
+      if (attachments.length === 0) {
+        await post({ conversation_id: conversationId, message_type: "text", content_text: trimmed });
+      } else {
+        const queue = [...attachments];
+        for (let i = 0; i < queue.length; i++) {
+          const a = queue[i];
+          const caption = i === 0 ? trimmed || undefined : undefined;
+          await post(
+            a.kind === "image"
+              ? {
+                  conversation_id: conversationId,
+                  message_type: "image",
+                  media_url: a.url,
+                  content_text: caption,
+                }
+              : {
+                  conversation_id: conversationId,
+                  message_type: "document",
+                  media_url: a.url,
+                  filename: a.filename,
+                  content_text: caption,
+                },
+          );
+          // Sent — the storage object now belongs to the message, so drop it from the list.
+          setAttachments((prev) => prev.filter((p) => p !== a));
+        }
       }
+
       toast.success(t("sendSuccess"));
-      // The staged storage object is referenced by the sent message now —
-      // forget it so closing the dialog doesn't delete the sent file.
-      setAttachment(null);
+      setMessage("");
       if (!activeConversationId) onOpenConversation(conversationId);
       onOpenChange(false);
-    } catch {
-      toast.error(t("sendError"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("sendError"));
     } finally {
       setSending(false);
     }
   }, [
     selected,
     message,
-    attachment,
+    attachments,
     sending,
     activeConversationId,
     resolveTargetConversationId,
@@ -343,6 +377,9 @@ export function OrderSearchDialog({
       setOpening(false);
     }
   }, [selected, opening, onOpenConversation, onOpenChange, t]);
+
+  const uploading = uploadingCount > 0;
+  const atLimit = attachments.length >= MAX_ATTACHMENTS;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -462,7 +499,9 @@ export function OrderSearchDialog({
               <OrderBiodataPreview
                 key={selected.transactionId}
                 paymentId={selected.transactionId}
-                onAttach={(file, kind) => void stageFile(file, kind)}
+                onAttach={(files, kind) => {
+                  for (const file of files) void stageFile(file, kind);
+                }}
               />
             ) : (
               <p className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
@@ -508,57 +547,61 @@ export function OrderSearchDialog({
               ref={imageInputRef}
               type="file"
               accept="image/png,image/jpeg,image/webp"
+              multiple
               className="hidden"
               onChange={handleImageChange}
             />
 
-            {attachment ? (
-              attachment.kind === "image" ? (
-                <div className="relative inline-block">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={attachment.url}
-                    alt=""
-                    className="h-20 w-20 rounded-lg object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={removeAttachment}
-                    aria-label={t("removeAttachment")}
-                    className="absolute -right-1.5 -top-1.5 rounded-full bg-background/90 p-0.5 text-muted-foreground shadow hover:bg-background hover:text-foreground"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <div className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/40 py-1.5 pl-2.5 pr-1.5 text-sm">
-                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate text-foreground">{attachment.filename}</span>
-                  <button
-                    type="button"
-                    onClick={removeAttachment}
-                    aria-label={t("removeAttachment")}
-                    className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )
-            ) : (
-              <button
-                type="button"
-                onClick={() => imageInputRef.current?.click()}
-                disabled={uploadingAttachment}
-                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-              >
-                {uploadingAttachment ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ImageIcon className="h-3.5 w-3.5" />
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {attachments.map((a, index) =>
+                  a.kind === "image" ? (
+                    <div key={`${a.url}-${index}`} className="relative inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={a.url} alt="" className="h-20 w-20 rounded-lg object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(index)}
+                        aria-label={t("removeAttachment")}
+                        className="absolute -right-1.5 -top-1.5 rounded-full bg-background/90 p-0.5 text-muted-foreground shadow hover:bg-background hover:text-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      key={`${a.url}-${index}`}
+                      className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/40 py-1.5 pl-2.5 pr-1.5 text-sm"
+                    >
+                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="max-w-[12rem] truncate text-foreground">{a.filename}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(index)}
+                        aria-label={t("removeAttachment")}
+                        className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ),
                 )}
-                {t("attachImage")}
-              </button>
+              </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={uploading || atLimit}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {uploading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ImageIcon className="h-3.5 w-3.5" />
+              )}
+              {t("attachImage")}
+            </button>
 
             <div className="flex items-center justify-end gap-2">
               {!activeConversationId && (
@@ -579,7 +622,7 @@ export function OrderSearchDialog({
               )}
               <Button
                 size="sm"
-                disabled={(!message.trim() && !attachment) || sending || uploadingAttachment}
+                disabled={(!message.trim() && attachments.length === 0) || sending || uploading}
                 onClick={handleSend}
                 className="gap-1.5"
               >
@@ -588,7 +631,7 @@ export function OrderSearchDialog({
                 ) : (
                   <Send className="h-4 w-4" />
                 )}
-                {t("send")}
+                {attachments.length > 1 ? t("sendCount", { count: attachments.length }) : t("send")}
               </Button>
             </div>
           </div>

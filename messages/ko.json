@@ -175,6 +175,8 @@
       "sendSuccess": "메시지를 보냈습니다.",
       "sendError": "메시지를 보낼 수 없습니다.",
       "fileTooLarge": "파일이 너무 큽니다 — 최대 {max}MB.",
+      "tooManyAttachments": "메시지당 최대 {max}개의 파일을 첨부할 수 있습니다.",
+      "sendCount": "파일 {count}개 보내기",
       "preview": {
         "title": "바이오데이터 미리보기",
         "loading": "바이오데이터를 불러오는 중…",
@@ -188,7 +190,6 @@
         },
         "download": "다운로드",
         "attach": "첨부",
-        "imageNeedsPdf": "여러 페이지 바이오데이터는 이미지 한 장으로 보낼 수 없습니다 — PDF를 사용하세요.",
         "generateError": "{format} 파일을 만들 수 없습니다.",
         "imageTooLarge": "이미지가 너무 큽니다 — 최대 {max}MB."
       }

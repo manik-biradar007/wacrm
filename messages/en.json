@@ -169,6 +169,8 @@
       "removeAttachment": "Remove attachment",
       "imageTooLarge": "Image is too large — max {max} MB.",
       "fileTooLarge": "File is too large — max {max} MB.",
+      "tooManyAttachments": "You can attach up to {max} files per message.",
+      "sendCount": "Send {count} files",
       "imageUploadError": "Couldn't upload the file.",
       "openConversation": "Open conversation",
       "openError": "Couldn't open the conversation.",
@@ -188,7 +190,6 @@
         },
         "download": "Download",
         "attach": "Attach",
-        "imageNeedsPdf": "Multi-page biodata can't be sent as a single image — use PDF.",
         "generateError": "Couldn't generate the {format} file.",
         "imageTooLarge": "Image is too large — max {max} MB."
       }

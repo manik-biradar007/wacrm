@@ -71,12 +71,20 @@ export function loadImage(src: string, crossOrigin = false): Promise<HTMLImageEl
   });
 }
 
-/** Loads every image one page render needs (background, god icon, profile photo). */
-export async function loadRenderImages(info: BiodataInfo, bgSrc: string): Promise<RenderImages> {
+/**
+ * Loads every image one page render needs (background, god icon, profile
+ * photo). `photoSrc` must be same-origin or a data URL, so the canvas stays
+ * exportable.
+ */
+export async function loadRenderImages(
+  info: BiodataInfo,
+  bgSrc: string,
+  photoSrc?: string,
+): Promise<RenderImages> {
   const [bg, god, profile] = await Promise.all([
     loadImage(bgSrc),
     loadImage(info.selectedGodIcon || DEFAULT_GOD_ICON),
-    info.profilePicture ? loadImage(info.profilePicture, true) : Promise.resolve(undefined),
+    photoSrc ? loadImage(photoSrc) : Promise.resolve(undefined),
   ]);
   return {
     bg,

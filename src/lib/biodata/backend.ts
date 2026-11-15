@@ -91,6 +91,30 @@ export async function fetchPurchaseBiodata(paymentId: string): Promise<PurchaseB
   };
 }
 
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Fetches a purchase's profile photo server-side, so the browser never has
+ * to load it cross-origin (photo hosts often send no CORS headers, which
+ * made the photo silently disappear and blocked canvas export). Returns null
+ * when the purchase has no http(s) photo or the fetch fails.
+ */
+export async function fetchProfilePhoto(
+  paymentId: string,
+): Promise<{ bytes: ArrayBuffer; contentType: string } | null> {
+  const purchase = await fetchPurchaseBiodata(paymentId);
+  const photo = purchase?.biodataInfo.profilePicture;
+  if (typeof photo !== "string" || !/^https?:\/\//.test(photo)) return null;
+
+  const res = await fetchWithTimeout(photo, { method: "GET" }, BACKEND_TIMEOUT_MS);
+  const contentType = res.headers.get("content-type")?.split(";")[0] ?? "";
+  if (!res.ok || !contentType.startsWith("image/")) return null;
+
+  const bytes = await res.arrayBuffer();
+  if (bytes.byteLength > MAX_PHOTO_BYTES) return null;
+  return { bytes, contentType };
+}
+
 /** Largest god-icon data URL accepted for conversion (the icons are a few KB). */
 const MAX_ICON_DATA_URL_CHARS = 2_000_000;
 const ICON_DATA_URL = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
