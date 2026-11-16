@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Download, Loader2, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   renderBiodataPage,
   loadRenderImages,
@@ -23,13 +24,19 @@ import {
   type Template,
 } from "@/lib/biodata/templates";
 
-export type OrderBiodataFormat = "image" | "pdf" | "word";
+import { getPlanFormats, SUPPORT_DAYS, type OrderBiodataFormat } from "@/lib/orders/plan";
+
+export type { OrderBiodataFormat };
 
 /** Attachment kind the dialog should stage the file as (matches the WhatsApp message type). */
 export type StagedKind = "image" | "document";
 
 interface OrderBiodataPreviewProps {
   paymentId: string;
+  /** Purchased plan (`image` | `edit` | `word`); only that plan's formats are offered. */
+  planType: string | null;
+  /** Support window (30 days) has passed: formats stay visible but are disabled. */
+  expired: boolean;
   /** Hands the generated file(s) to the dialog, which uploads and stages them for sending. */
   onAttach: (files: File[], kind: StagedKind) => void;
 }
@@ -100,7 +107,7 @@ function downloadFile(file: File) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreviewProps) {
+export function OrderBiodataPreview({ paymentId, planType, expired, onAttach }: OrderBiodataPreviewProps) {
   const t = useTranslations("Inbox.orderSearch.preview");
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [busy, setBusy] = useState<{ format: OrderBiodataFormat; action: "download" | "attach" } | null>(null);
@@ -313,7 +320,7 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
   }
 
   const pages = pageCount(state.mode);
-  const formats: OrderBiodataFormat[] = ["image", "pdf", "word"];
+  const formats = getPlanFormats(planType);
 
   return (
     <div className="space-y-3">
@@ -334,18 +341,31 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
         ))}
       </div>
 
-      <div className="divide-y divide-border rounded-lg border border-border">
+      {expired && (
+        <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+          {t("expired", { days: SUPPORT_DAYS })}
+        </p>
+      )}
+
+      <div
+        className={cn(
+          "divide-y rounded-lg border",
+          expired ? "divide-destructive/30 border-destructive/40 bg-destructive/5" : "divide-border border-border",
+        )}
+      >
         {formats.map((format) => {
           const isBusy = busy?.format === format;
           return (
             <div key={format} className="flex items-center justify-between gap-2 px-3 py-2">
-              <span className="text-sm font-medium text-foreground">{t(`formats.${format}`)}</span>
+              <span className={cn("text-sm font-medium", expired ? "text-destructive/70" : "text-foreground")}>
+                {t(`formats.${format}`)}
+              </span>
               <div className="flex items-center gap-1">
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 gap-1 px-2 text-xs"
-                  disabled={!!busy}
+                  disabled={!!busy || expired}
                   onClick={() => handleDownload(format)}
                 >
                   {isBusy && busy?.action === "download" ? (
@@ -359,7 +379,7 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
                   variant="ghost"
                   size="sm"
                   className="h-7 gap-1 px-2 text-xs text-primary"
-                  disabled={!!busy}
+                  disabled={!!busy || expired}
                   onClick={() => handleAttach(format)}
                 >
                   {isBusy && busy?.action === "attach" ? (
