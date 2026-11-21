@@ -32,7 +32,11 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { CHAT_MEDIA_BUCKET } from "./message-composer";
-import { OrderBiodataPreview, type StagedKind } from "./order-biodata-preview";
+import {
+  OrderBiodataPreview,
+  type OrderSendItem,
+  type StagedKind,
+} from "./order-biodata-preview";
 
 /** Same support-page screenshot the "Biodata Support Bot" flow attaches
  *  on its own order-found step, so agents send the identical template. */
@@ -48,6 +52,17 @@ const MAX_ATTACHMENTS = 10;
  *  agent doesn't have to retype the re-download instructions by hand. */
 function buildOrderFoundMessage(paymentId: string): string {
   return `✅ We found your order!\n\nYour Payment ID:\n${paymentId}\n\nGo back to the website where you purchased your biodata and open the Download/Support section there. Paste this Payment ID exactly as shown above (including "pay_") to re-download your biodata.\n\n📺 Watch Video Guide:\n${ORDER_FOUND_VIDEO_URL}`;
+}
+
+/** Posts one WhatsApp message; throws with the API's error (or `fallbackError`). */
+async function postWhatsAppMessage(body: Record<string, unknown>, fallbackError: string) {
+  const res = await fetch("/api/whatsapp/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(data.error ?? fallbackError);
 }
 
 /** A file staged on the composer, waiting to be sent. */
@@ -296,15 +311,7 @@ export function OrderSearchDialog({
       const conversationId = await resolveTargetConversationId();
       if (!conversationId) return;
 
-      const post = async (body: Record<string, unknown>) => {
-        const res = await fetch("/api/whatsapp/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error ?? t("sendError"));
-      };
+      const post = (body: Record<string, unknown>) => postWhatsAppMessage(body, t("sendError"));
 
       if (attachments.length === 0) {
         await post({ conversation_id: conversationId, message_type: "text", content_text: trimmed });
@@ -355,6 +362,62 @@ export function OrderSearchDialog({
     t,
   ]);
 
+  /**
+   * The preview's per-format "Send" and "Send all": uploads each generated
+   * file and sends it as its own message right away, skipping the composer.
+   * The dialog stays open so the agent can follow up with a text message.
+   */
+  const sendGeneratedFiles = useCallback(
+    async (items: OrderSendItem[]) => {
+      if (items.length === 0) return;
+      const oversized = items.find(({ file, kind }) => file.size > MEDIA_MAX_BYTES_BY_KIND[kind]);
+      if (oversized) {
+        const max = Math.round(MEDIA_MAX_BYTES_BY_KIND[oversized.kind] / 1024 / 1024);
+        toast.error(
+          oversized.kind === "image" ? t("imageTooLarge", { max }) : t("fileTooLarge", { max }),
+        );
+        return;
+      }
+
+      let sent = 0;
+      try {
+        const conversationId = await resolveTargetConversationId();
+        if (!conversationId) return;
+
+        for (const { file, kind } of items) {
+          const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+          try {
+            await postWhatsAppMessage(
+              kind === "image"
+                ? { conversation_id: conversationId, message_type: "image", media_url: publicUrl }
+                : {
+                    conversation_id: conversationId,
+                    message_type: "document",
+                    media_url: publicUrl,
+                    filename: file.name,
+                  },
+              t("sendError"),
+            );
+          } catch (err) {
+            // Never reached the customer — don't leave the upload orphaned.
+            void deleteAccountMedia(CHAT_MEDIA_BUCKET, path).catch(() => {});
+            throw err;
+          }
+          sent++;
+        }
+
+        // From the global search, switch the inbox to the thread we just
+        // sent into; later sends from this dialog then target it directly.
+        if (!activeConversationId) onOpenConversation(conversationId);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("sendError"));
+      } finally {
+        if (sent > 0) toast.success(t("filesSent", { count: sent }));
+      }
+    },
+    [activeConversationId, resolveTargetConversationId, onOpenConversation, t],
+  );
+
   const handleOpenConversation = useCallback(async () => {
     if (!selected?.mobile || opening) return;
     setOpening(true);
@@ -383,7 +446,7 @@ export function OrderSearchDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[92vh] sm:max-w-2xl lg:max-w-5xl">
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
@@ -399,12 +462,12 @@ export function OrderSearchDialog({
               setSelected(null);
             }}
             placeholder={t("placeholder")}
-            className="pl-9"
+            className="h-10 pl-9 text-sm"
           />
         </div>
 
         {!selected ? (
-          <ScrollArea className="max-h-80">
+          <ScrollArea className="max-h-[65vh]">
             <div className="space-y-1.5 pr-2">
               {searching && (
                 <div className="flex items-center justify-center py-6 text-muted-foreground">
@@ -451,6 +514,7 @@ export function OrderSearchDialog({
                       {r.utr && r.utr !== r.transactionId && (
                         <Badge variant="outline">{r.utr}</Badge>
                       )}
+                      {r.site && <Badge variant="outline">{r.site}</Badge>}
                       <Badge
                         variant={r.downloaded > 0 ? "secondary" : "outline"}
                         className={cn(!r.downloaded && "text-muted-foreground")}
@@ -465,174 +529,179 @@ export function OrderSearchDialog({
             </div>
           </ScrollArea>
         ) : (
-          <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
-            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-foreground">
-                  {selected.personName || t("unnamed")}
-                </span>
+          // Two columns on wide screens: biodata preview + send buttons on
+          // the left, order details + composer on the right, each scrolling
+          // on its own. Stacks into one scrolling column on narrow screens.
+          <div className="grid max-h-[75vh] gap-4 overflow-y-auto pr-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:overflow-hidden lg:pr-0">
+            <div className="space-y-3 lg:max-h-[75vh] lg:overflow-y-auto lg:pr-1">
+              <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-foreground">
+                    {selected.personName || t("unnamed")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(null)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {t("back")}
+                  </button>
+                </div>
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <dt>{t("mobile")}</dt>
+                  <dd className="text-foreground">{selected.mobile ?? "—"}</dd>
+                  <dt>{t("amount")}</dt>
+                  <dd className="text-foreground">{selected.amount ?? "—"}</dd>
+                  <dt>{t("paymentId")}</dt>
+                  <dd className="truncate text-foreground">{selected.transactionId ?? "—"}</dd>
+                  <dt>{t("utr")}</dt>
+                  <dd className="truncate text-foreground">{selected.utr ?? "—"}</dd>
+                  <dt>{t("purchasedOn")}</dt>
+                  <dd className="text-foreground">
+                    {new Date(selected.createdOn).toLocaleString()}
+                  </dd>
+                </dl>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setSelected(null)}
-                  className="text-xs text-muted-foreground hover:text-foreground"
+                  onClick={applyFoundTemplate}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
                 >
-                  {t("back")}
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {t("useFoundTemplate")}
                 </button>
+                <a
+                  href={ORDER_FOUND_VIDEO_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {t("watchVideoGuide")}
+                </a>
               </div>
-              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <dt>{t("mobile")}</dt>
-                <dd className="text-foreground">{selected.mobile ?? "—"}</dd>
-                <dt>{t("amount")}</dt>
-                <dd className="text-foreground">{selected.amount ?? "—"}</dd>
-                <dt>{t("paymentId")}</dt>
-                <dd className="truncate text-foreground">{selected.transactionId ?? "—"}</dd>
-                <dt>{t("utr")}</dt>
-                <dd className="truncate text-foreground">{selected.utr ?? "—"}</dd>
-                <dt>{t("purchasedOn")}</dt>
-                <dd className="text-foreground">
-                  {new Date(selected.createdOn).toLocaleString()}
-                </dd>
-              </dl>
-            </div>
 
-            {selected.transactionId ? (
-              <OrderBiodataPreview
-                key={selected.transactionId}
-                paymentId={selected.transactionId}
-                onAttach={(files, kind) => {
-                  for (const file of files) void stageFile(file, kind);
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
                 }}
+                placeholder={t("messagePlaceholder")}
+                rows={5}
+                className="w-full resize-none rounded-xl border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50"
               />
-            ) : (
-              <p className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
-                {t("preview.missing")}
-              </p>
-            )}
 
-            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                className="hidden"
+                onChange={handleImageChange}
+              />
+
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {attachments.map((a, index) =>
+                    a.kind === "image" ? (
+                      <div key={`${a.url}-${index}`} className="relative inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={a.url} alt="" className="h-20 w-20 rounded-lg object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(index)}
+                          aria-label={t("removeAttachment")}
+                          className="absolute -right-1.5 -top-1.5 rounded-full bg-background/90 p-0.5 text-muted-foreground shadow hover:bg-background hover:text-foreground"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        key={`${a.url}-${index}`}
+                        className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/40 py-1.5 pl-2.5 pr-1.5 text-sm"
+                      >
+                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="max-w-[12rem] truncate text-foreground">{a.filename}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(index)}
+                          aria-label={t("removeAttachment")}
+                          className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
+
               <button
                 type="button"
-                onClick={applyFoundTemplate}
-                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-primary/10"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={uploading || atLimit}
+                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
               >
-                <Sparkles className="h-3.5 w-3.5" />
-                {t("useFoundTemplate")}
+                {uploading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ImageIcon className="h-3.5 w-3.5" />
+                )}
+                {t("attachImage")}
               </button>
-              <a
-                href={ORDER_FOUND_VIDEO_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                {t("watchVideoGuide")}
-              </a>
+
+              <div className="flex items-center justify-end gap-2">
+                {!activeConversationId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={opening}
+                    className="mr-auto gap-1.5 text-xs text-muted-foreground"
+                    onClick={handleOpenConversation}
+                  >
+                    {opening ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    )}
+                    {t("openConversation")}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  disabled={(!message.trim() && attachments.length === 0) || sending || uploading}
+                  onClick={handleSend}
+                  className="gap-1.5"
+                >
+                  {sending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {attachments.length > 1 ? t("sendCount", { count: attachments.length }) : t("send")}
+                </Button>
+              </div>
             </div>
 
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-              }}
-              placeholder={t("messagePlaceholder")}
-              rows={5}
-              className="w-full resize-none rounded-xl border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50"
-            />
-
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              multiple
-              className="hidden"
-              onChange={handleImageChange}
-            />
-
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {attachments.map((a, index) =>
-                  a.kind === "image" ? (
-                    <div key={`${a.url}-${index}`} className="relative inline-block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={a.url} alt="" className="h-20 w-20 rounded-lg object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(index)}
-                        aria-label={t("removeAttachment")}
-                        className="absolute -right-1.5 -top-1.5 rounded-full bg-background/90 p-0.5 text-muted-foreground shadow hover:bg-background hover:text-foreground"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      key={`${a.url}-${index}`}
-                      className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/40 py-1.5 pl-2.5 pr-1.5 text-sm"
-                    >
-                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="max-w-[12rem] truncate text-foreground">{a.filename}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(index)}
-                        aria-label={t("removeAttachment")}
-                        className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ),
-                )}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => imageInputRef.current?.click()}
-              disabled={uploading || atLimit}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-            >
-              {uploading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <div className="lg:order-first lg:max-h-[75vh] lg:overflow-y-auto lg:pr-1">
+              {selected.transactionId ? (
+                <OrderBiodataPreview
+                  key={selected.transactionId}
+                  paymentId={selected.transactionId}
+                  onSend={sendGeneratedFiles}
+                />
               ) : (
-                <ImageIcon className="h-3.5 w-3.5" />
+                <p className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+                  {t("preview.missing")}
+                </p>
               )}
-              {t("attachImage")}
-            </button>
-
-            <div className="flex items-center justify-end gap-2">
-              {!activeConversationId && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={opening}
-                  className="mr-auto gap-1.5 text-xs text-muted-foreground"
-                  onClick={handleOpenConversation}
-                >
-                  {opening ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  )}
-                  {t("openConversation")}
-                </Button>
-              )}
-              <Button
-                size="sm"
-                disabled={(!message.trim() && attachments.length === 0) || sending || uploading}
-                onClick={handleSend}
-                className="gap-1.5"
-              >
-                {sending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-                {attachments.length > 1 ? t("sendCount", { count: attachments.length }) : t("send")}
-              </Button>
             </div>
           </div>
         )}

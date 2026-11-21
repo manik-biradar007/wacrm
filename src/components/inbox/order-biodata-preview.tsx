@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Download, Loader2, Paperclip } from "lucide-react";
+import { Download, Loader2, Send, SendHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   renderBiodataPage,
@@ -28,10 +28,16 @@ export type OrderBiodataFormat = "image" | "pdf" | "word";
 /** Attachment kind the dialog should stage the file as (matches the WhatsApp message type). */
 export type StagedKind = "image" | "document";
 
+/** One generated file, ready to upload and send as its own WhatsApp message. */
+export interface OrderSendItem {
+  file: File;
+  kind: StagedKind;
+}
+
 interface OrderBiodataPreviewProps {
   paymentId: string;
-  /** Hands the generated file(s) to the dialog, which uploads and stages them for sending. */
-  onAttach: (files: File[], kind: StagedKind) => void;
+  /** Uploads and sends the given files straight to the customer, in order. */
+  onSend: (items: OrderSendItem[]) => Promise<void>;
 }
 
 /** On-screen preview resolution (2× the 794px design width). */
@@ -100,12 +106,12 @@ function downloadFile(file: File) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreviewProps) {
+export function OrderBiodataPreview({ paymentId, onSend }: OrderBiodataPreviewProps) {
   const t = useTranslations("Inbox.orderSearch.preview");
   const [state, setState] = useState<DetailState>({ status: "loading" });
-  const [busy, setBusy] = useState<{ format: OrderBiodataFormat; action: "download" | "attach" } | null>(null);
+  const [busy, setBusy] = useState<{ format: OrderBiodataFormat | "all"; action: "download" | "send" } | null>(null);
   const previewRefs = useRef<Array<HTMLCanvasElement | null>>([]);
-  // Files already generated for this order, so Download and Attach on the
+  // Files already generated for this order, so Download and Send on the
   // same format don't re-render (or re-convert) the biodata twice.
   const fileCache = useRef(new Map<OrderBiodataFormat, File[]>());
 
@@ -265,26 +271,64 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
     [busy, getFiles, t],
   );
 
-  const handleAttach = useCallback(
+  /**
+   * Generates one format as send items, or throws a user-facing error when
+   * it can't be sent (e.g. an image over WhatsApp's 5 MB cap).
+   */
+  const getSendItems = useCallback(
+    async (format: OrderBiodataFormat): Promise<OrderSendItem[]> => {
+      const files = await getFiles(format);
+      const kind: StagedKind = format === "image" ? "image" : "document";
+      if (kind === "image" && files.some((f) => f.size > IMAGE_ATTACH_MAX_BYTES)) {
+        throw new Error(t("imageTooLarge", { max: Math.round(IMAGE_ATTACH_MAX_BYTES / 1024 / 1024) }));
+      }
+      return files.map((file) => ({ file, kind }));
+    },
+    [getFiles, t],
+  );
+
+  const handleSend = useCallback(
     async (format: OrderBiodataFormat) => {
       if (busy) return;
-      setBusy({ format, action: "attach" });
+      setBusy({ format, action: "send" });
       try {
-        const files = await getFiles(format);
-        if (files.length === 0) return;
-        const kind: StagedKind = format === "image" ? "image" : "document";
-        if (kind === "image" && files.some((f) => f.size > IMAGE_ATTACH_MAX_BYTES)) {
-          toast.error(t("imageTooLarge", { max: Math.round(IMAGE_ATTACH_MAX_BYTES / 1024 / 1024) }));
-          return;
-        }
-        onAttach(files, kind);
+        const items = await getSendItems(format);
+        if (items.length > 0) await onSend(items);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("generateError", { format: t(`formats.${format}`) }));
       } finally {
         setBusy(null);
       }
     },
-    [busy, getFiles, onAttach, t],
+    [busy, getSendItems, onSend, t],
+  );
+
+  /**
+   * Sends every format that generates and fits WhatsApp's limits. A format
+   * that fails (e.g. the Word service is down) is skipped with a warning
+   * instead of blocking the rest.
+   */
+  const handleSendAll = useCallback(
+    async (formats: OrderBiodataFormat[]) => {
+      if (busy) return;
+      setBusy({ format: "all", action: "send" });
+      try {
+        const items: OrderSendItem[] = [];
+        const skipped: string[] = [];
+        for (const format of formats) {
+          try {
+            items.push(...(await getSendItems(format)));
+          } catch {
+            skipped.push(t(`formats.${format}`));
+          }
+        }
+        if (skipped.length > 0) toast.warning(t("skippedFormats", { formats: skipped.join(", ") }));
+        if (items.length > 0) await onSend(items);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [busy, getSendItems, onSend, t],
   );
 
   if (state.status === "loading") {
@@ -360,19 +404,35 @@ export function OrderBiodataPreview({ paymentId, onAttach }: OrderBiodataPreview
                   size="sm"
                   className="h-7 gap-1 px-2 text-xs text-primary"
                   disabled={!!busy}
-                  onClick={() => handleAttach(format)}
+                  onClick={() => handleSend(format)}
                 >
-                  {isBusy && busy?.action === "attach" ? (
+                  {isBusy && busy?.action === "send" ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <Paperclip className="h-3.5 w-3.5" />
+                    <Send className="h-3.5 w-3.5" />
                   )}
-                  {t("attach")}
+                  {t("send")}
                 </Button>
               </div>
             </div>
           );
         })}
+        <div className="flex items-center justify-between gap-2 bg-muted/40 px-3 py-2">
+          <span className="text-xs text-muted-foreground">{t("sendAllHint")}</span>
+          <Button
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 px-3 text-xs"
+            disabled={!!busy}
+            onClick={() => handleSendAll(formats)}
+          >
+            {busy?.format === "all" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <SendHorizontal className="h-3.5 w-3.5" />
+            )}
+            {t("sendAll")}
+          </Button>
+        </div>
       </div>
     </div>
   );

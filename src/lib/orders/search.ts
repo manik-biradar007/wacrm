@@ -34,7 +34,15 @@ export async function searchOrders(query: string): Promise<OrderSearchResult[]> 
   const trimmed = query.trim();
   if (!trimmed) return [];
 
-  const digits = trimmed.replace(/\D/g, "");
+  // Only treat the query as a phone number when it's made of digits and
+  // phone formatting (+, spaces, dashes, parens). Otherwise the digits
+  // scattered inside a payment id (e.g. "pay_U2fz18FDBBLq7y" → "2187")
+  // would substring-match unrelated mobile numbers.
+  const looksLikePhone = /^[\d\s+\-()]+$/.test(trimmed);
+  const digits = looksLikePhone ? trimmed.replace(/\D/g, "") : "";
+
+  // Escape LIKE wildcards so "_" in "pay_..." matches literally.
+  const likePattern = `%${trimmed.replace(/[\\%_]/g, "\\$&")}%`;
 
   interface Row {
     id: number;
@@ -62,7 +70,7 @@ export async function searchOrders(query: string): Promise<OrderSearchResult[]> 
             OR utr_rrn_id ILIKE $1
          ORDER BY created_on DESC
          LIMIT ${MAX_RESULTS}`,
-        [`%${trimmed}%`, digits],
+        [likePattern, digits],
       ),
     );
 

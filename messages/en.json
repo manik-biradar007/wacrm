@@ -176,6 +176,7 @@
       "openError": "Couldn't open the conversation.",
       "send": "Send",
       "sendSuccess": "Message sent.",
+      "filesSent": "Sent {count, plural, one {# file} other {# files}} to the customer.",
       "sendError": "Couldn't send the message.",
       "preview": {
         "title": "Biodata preview",
@@ -189,7 +190,10 @@
           "word": "Word (DOCX)"
         },
         "download": "Download",
-        "attach": "Attach",
+        "send": "Send",
+        "sendAll": "Send all",
+        "sendAllHint": "Send every format straight to the customer",
+        "skippedFormats": "Skipped: {formats}",
         "generateError": "Couldn't generate the {format} file.",
         "imageTooLarge": "Image is too large — max {max} MB."
       }
