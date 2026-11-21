@@ -195,7 +195,8 @@
         "sendAllHint": "모든 형식을 고객에게 바로 보냅니다",
         "skippedFormats": "건너뜀: {formats}",
         "generateError": "{format} 파일을 만들 수 없습니다.",
-        "imageTooLarge": "이미지가 너무 큽니다 — 최대 {max}MB."
+        "imageTooLarge": "이미지가 너무 큽니다 — 최대 {max}MB.",
+        "expired": "플랜이 만료되었습니다 — 구매일로부터 {days}일간 지원됩니다."
       }
     },
     "messageThread": {

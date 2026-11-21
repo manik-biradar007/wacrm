@@ -195,7 +195,8 @@
         "sendAllHint": "Send every format straight to the customer",
         "skippedFormats": "Skipped: {formats}",
         "generateError": "Couldn't generate the {format} file.",
-        "imageTooLarge": "Image is too large — max {max} MB."
+        "imageTooLarge": "Image is too large — max {max} MB.",
+        "expired": "Plan expired — support is provided for {days} days from purchase."
       }
     },
     "messageThread": {

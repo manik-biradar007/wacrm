@@ -32,6 +32,7 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { CHAT_MEDIA_BUCKET } from "./message-composer";
+import { isPlanExpired } from "@/lib/orders/plan";
 import {
   OrderBiodataPreview,
   type OrderSendItem,
@@ -695,6 +696,8 @@ export function OrderSearchDialog({
                 <OrderBiodataPreview
                   key={selected.transactionId}
                   paymentId={selected.transactionId}
+                  planType={selected.type}
+                  expired={isPlanExpired(selected.createdOn)}
                   onSend={sendGeneratedFiles}
                 />
               ) : (
