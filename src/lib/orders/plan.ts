@@ -28,6 +28,17 @@ export function getPlanExpiry(createdOn: string): Date | null {
   return new Date(created.getTime() + SUPPORT_DAYS * DAY_MS);
 }
 
+/**
+ * Whole days left in the support window (rounded up, so the last partial
+ * day still counts as 1). Zero or negative once expired; null for an
+ * unparseable date.
+ */
+export function getSupportDaysLeft(createdOn: string, now: Date = new Date()): number | null {
+  const expiry = getPlanExpiry(createdOn);
+  if (!expiry) return null;
+  return Math.ceil((expiry.getTime() - now.getTime()) / DAY_MS);
+}
+
 /** True once the 30-day support window has passed. An unparseable date is treated as not expired. */
 export function isPlanExpired(createdOn: string, now: Date = new Date()): boolean {
   const expiry = getPlanExpiry(createdOn);

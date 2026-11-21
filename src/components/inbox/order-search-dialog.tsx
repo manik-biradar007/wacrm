@@ -32,7 +32,7 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { CHAT_MEDIA_BUCKET } from "./message-composer";
-import { isPlanExpired } from "@/lib/orders/plan";
+import { getPlanExpiry, getSupportDaysLeft, isPlanExpired } from "@/lib/orders/plan";
 import {
   OrderBiodataPreview,
   type OrderSendItem,
@@ -106,6 +106,43 @@ interface OrderSearchDialogProps {
    * wrong thread.
    */
   activeConversationId?: string | null;
+}
+
+/** Support windows this close to ending get an amber "ending soon" tag. */
+const SUPPORT_ENDING_SOON_DAYS = 5;
+
+/**
+ * Tag showing where an order is in its 30-day support window: red
+ * "Expired", amber when it ends within a few days, green otherwise.
+ */
+function SupportStatusBadge({ createdOn }: { createdOn: string }) {
+  const t = useTranslations("Inbox.orderSearch");
+  const daysLeft = getSupportDaysLeft(createdOn);
+  if (daysLeft === null) return null;
+
+  if (isPlanExpired(createdOn)) {
+    return (
+      <Badge
+        variant="outline"
+        className="border-destructive/50 bg-destructive/10 font-semibold text-destructive"
+      >
+        {t("planExpired")}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        daysLeft <= SUPPORT_ENDING_SOON_DAYS
+          ? "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+          : "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+      )}
+    >
+      {t("planDaysLeft", { days: daysLeft })}
+    </Badge>
+  );
 }
 
 // Debounce a search-as-you-type input against the external orders DB
@@ -491,13 +528,19 @@ export function OrderSearchDialog({
                     key={r.id}
                     type="button"
                     onClick={() => setSelected(r)}
-                    className="w-full rounded-lg border border-border bg-muted/40 p-3 text-left transition-colors hover:bg-muted"
+                    className={cn(
+                      "w-full rounded-lg border bg-muted/40 p-3 text-left transition-colors hover:bg-muted",
+                      isPlanExpired(r.createdOn)
+                        ? "border-destructive/40 border-l-4 border-l-destructive"
+                        : "border-border",
+                    )}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium text-foreground">
                         {r.personName || t("unnamed")}
                       </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
+                      <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                        <SupportStatusBadge createdOn={r.createdOn} />
                         {new Date(r.createdOn).toLocaleDateString()}
                       </span>
                     </div>
@@ -536,9 +579,12 @@ export function OrderSearchDialog({
           <div className="grid max-h-[75vh] gap-4 overflow-y-auto pr-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:overflow-hidden lg:pr-0">
             <div className="space-y-3 lg:max-h-[75vh] lg:overflow-y-auto lg:pr-1">
               <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-foreground">
-                    {selected.personName || t("unnamed")}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-medium text-foreground">
+                      {selected.personName || t("unnamed")}
+                    </span>
+                    <SupportStatusBadge createdOn={selected.createdOn} />
                   </span>
                   <button
                     type="button"
@@ -561,6 +607,20 @@ export function OrderSearchDialog({
                   <dd className="text-foreground">
                     {new Date(selected.createdOn).toLocaleString()}
                   </dd>
+                  {(() => {
+                    const expiry = getPlanExpiry(selected.createdOn);
+                    if (!expiry) return null;
+                    const expired = isPlanExpired(selected.createdOn);
+                    const date = expiry.toLocaleDateString();
+                    return (
+                      <>
+                        <dt>{t("support")}</dt>
+                        <dd className={cn(expired ? "font-medium text-destructive" : "text-foreground")}>
+                          {expired ? t("supportExpiredOn", { date }) : t("supportUntil", { date })}
+                        </dd>
+                      </>
+                    );
+                  })()}
                 </dl>
               </div>
 
