@@ -108,6 +108,20 @@ interface OrderSearchDialogProps {
   activeConversationId?: string | null;
 }
 
+/** Shows `text` with the first case-insensitive match of `query` highlighted. */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const start = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if (start < 0) return <>{text}</>;
+  const end = start + query.length;
+  return (
+    <>
+      {text.slice(0, start)}
+      <mark className="rounded-sm bg-yellow-300 px-0.5 text-black">{text.slice(start, end)}</mark>
+      {text.slice(end)}
+    </>
+  );
+}
+
 /** Support windows this close to ending get an amber "ending soon" tag. */
 const SUPPORT_ENDING_SOON_DAYS = 5;
 
@@ -545,7 +559,11 @@ export function OrderSearchDialog({
                       </span>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                      {r.mobile && <span>{r.mobile}</span>}
+                      {r.mobile && (
+                        <span>
+                          <Highlight text={r.mobile} query={query.trim()} />
+                        </span>
+                      )}
                       {r.amount && (
                         <Badge variant="outline" className="gap-0.5">
                           <IndianRupee className="h-2.5 w-2.5" />
@@ -553,10 +571,14 @@ export function OrderSearchDialog({
                         </Badge>
                       )}
                       {r.transactionId && (
-                        <Badge variant="outline">{r.transactionId}</Badge>
+                        <Badge variant="outline">
+                          <Highlight text={r.transactionId} query={query.trim()} />
+                        </Badge>
                       )}
                       {r.utr && r.utr !== r.transactionId && (
-                        <Badge variant="outline">{r.utr}</Badge>
+                        <Badge variant="outline">
+                          <Highlight text={r.utr} query={query.trim()} />
+                        </Badge>
                       )}
                       {r.site && <Badge variant="outline">{r.site}</Badge>}
                       <Badge
