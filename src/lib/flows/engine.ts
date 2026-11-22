@@ -1100,10 +1100,31 @@ async function handleReplyForActiveRun(
   // message here isn't a "reply" to anything — falling through to the
   // fallback policy below would silently no-op the reprompt branch
   // (no node_type case matches "wait") while still counting toward the
-  // handoff/end threshold. Just let it pass through uninvolved; the
-  // cron sweep resumes the run on its own schedule regardless.
+  // handoff/end threshold.
+  //
+  // But if the wait is already overdue (the cron pinger only fires every
+  // few minutes, or a previous resume died mid-advance and left
+  // resume_at NULL), the customer is sitting with no reply. Resume the
+  // run right now instead of ignoring them until the next sweep. A wait
+  // that hasn't elapsed yet still lets the message pass through.
   if (currentNode.node_type === "wait") {
-    return { consumed: false, flow_run_id: run.id, outcome: "no_match" };
+    const due =
+      run.resume_at === null ||
+      new Date(run.resume_at).getTime() <= Date.now();
+    if (!due) {
+      return { consumed: false, flow_run_id: run.id, outcome: "no_match" };
+    }
+    const resumed = await resumeParkedWait(
+      db,
+      run,
+      currentNode,
+      nodes,
+      "inbound",
+    );
+    if (!resumed) {
+      return { consumed: false, flow_run_id: run.id, outcome: "no_match" };
+    }
+    return { consumed: true, flow_run_id: run.id, outcome: resumed.outcome };
   }
 
   // Two ways a reply can advance:
@@ -1387,6 +1408,73 @@ async function startNewRun(
 }
 
 /**
+ * How long a resume "claims" a parked run. While claimed, `resume_at`
+ * is pushed this far into the future so no other sweep or webhook picks
+ * the run up. If the worker dies mid-advance (platform time limit,
+ * crash), the claim simply expires and the next sweep retries the run —
+ * previously `resume_at` was cleared up front, so a run that died
+ * mid-advance stayed parked at `wait` forever, silently ignoring every
+ * customer message until the 24h stale sweep.
+ */
+const WAIT_RESUME_LEASE_MS = 5 * 60 * 1000;
+
+/**
+ * Atomically claims a run parked at `waitNode` and advances it from the
+ * wait's `next_node_key`. Returns null when the claim is lost (another
+ * sweep / webhook already resumed it), otherwise the advance outcome.
+ *
+ * The claim is a compare-and-set on (current_node_key, resume_at), so
+ * the cron sweep and an inbound webhook racing on the same run can't
+ * both advance it. A run whose `resume_at` is NULL while still at a
+ * wait node (left behind by the old clear-first behaviour) is claimable
+ * too.
+ */
+async function resumeParkedWait(
+  db: AdminClient,
+  run: FlowRunRow,
+  waitNode: FlowNodeRow,
+  nodes: Map<string, FlowNodeRow>,
+  source: "cron" | "inbound",
+): Promise<{ outcome: "advanced" | "completed" | "handed_off" } | null> {
+  const lease = new Date(Date.now() + WAIT_RESUME_LEASE_MS).toISOString();
+  let claim = db
+    .from("flow_runs")
+    .update({ resume_at: lease })
+    .eq("id", run.id)
+    .eq("status", "active")
+    .eq("current_node_key", waitNode.node_key);
+  claim =
+    run.resume_at === null
+      ? claim.is("resume_at", null)
+      : claim.eq("resume_at", run.resume_at);
+  const { data: claimed, error } = await claim.select("id");
+  if (error) {
+    console.error("[flows] wait resume claim error:", error.message);
+    return null;
+  }
+  if (!Array.isArray(claimed) || claimed.length === 0) return null;
+  run.resume_at = lease;
+
+  await logEvent(db, run.id, "node_entered", waitNode.node_key, {
+    node_type: "wait",
+    resumed: true,
+    source,
+  });
+  const cfg = waitNode.config as unknown as WaitNodeConfig;
+  const result = await advanceFromNodeKey(db, run, cfg.next_node_key, nodes);
+
+  // Release the lease. Guarded on the lease value: if the flow hit a
+  // second `wait` node it has already written a fresh resume_at, which
+  // must survive.
+  await db
+    .from("flow_runs")
+    .update({ resume_at: null })
+    .eq("id", run.id)
+    .eq("resume_at", lease);
+  return result;
+}
+
+/**
  * Advances every run parked at a `wait` node whose `resume_at` has
  * passed. Called by `/api/flows/cron` alongside its existing timeout
  * sweep — see migration 037's `idx_flow_runs_active_resume`.
@@ -1413,28 +1501,33 @@ export async function resumeDueWaits(
   let resumed = 0;
   try {
     for (const run of (data ?? []) as FlowRunRow[]) {
-      const nodes = await loadAllNodes(db, run.flow_id);
-      const waitNode = run.current_node_key
-        ? (nodes.get(run.current_node_key) ?? null)
-        : null;
-      if (!waitNode || waitNode.node_type !== "wait") {
-        // Row is stale/inconsistent (e.g. the node was deleted/retyped
-        // out from under a parked run) — clear resume_at so it stops
-        // being rescanned every sweep instead of spinning forever.
-        await db.from("flow_runs").update({ resume_at: null }).eq("id", run.id);
-        await logEvent(db, run.id, "error", run.current_node_key, {
-          reason: "wait_resume_node_mismatch",
-        });
-        continue;
+      try {
+        const nodes = await loadAllNodes(db, run.flow_id);
+        const waitNode = run.current_node_key
+          ? (nodes.get(run.current_node_key) ?? null)
+          : null;
+        if (!waitNode || waitNode.node_type !== "wait") {
+          // Row is stale/inconsistent (e.g. the node was deleted/retyped
+          // out from under a parked run, or a previous resume advanced
+          // the run but died before releasing its lease) — clear
+          // resume_at so it stops being rescanned every sweep.
+          await db.from("flow_runs").update({ resume_at: null }).eq("id", run.id);
+          await logEvent(db, run.id, "error", run.current_node_key, {
+            reason: "wait_resume_node_mismatch",
+          });
+          continue;
+        }
+        const result = await resumeParkedWait(db, run, waitNode, nodes, "cron");
+        if (result) resumed += 1;
+      } catch (err) {
+        // The run keeps its lease, so the next sweep after the lease
+        // expires retries it — one bad run never blocks the others.
+        console.error(
+          "[flows] resumeDueWaits run error:",
+          run.id,
+          err instanceof Error ? err.message : err,
+        );
       }
-      const cfg = waitNode.config as unknown as WaitNodeConfig;
-      await db.from("flow_runs").update({ resume_at: null }).eq("id", run.id);
-      await logEvent(db, run.id, "node_entered", waitNode.node_key, {
-        node_type: "wait",
-        resumed: true,
-      });
-      await advanceFromNodeKey(db, run, cfg.next_node_key, nodes);
-      resumed += 1;
     }
   } finally {
     // One cron tick can resume many runs — flush once at the end
